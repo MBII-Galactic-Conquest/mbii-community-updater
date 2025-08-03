@@ -34,6 +34,12 @@ except ImportError:
     tk.messagebox.showerror("Error", "The Pygame library is not installed. Please install it with 'pip install pygame' and restart the application.")
     sys.exit()
 
+def get_resource_path(filename):
+    """Returns the correct path for PyInstaller-bundled resources."""
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, filename)
+    return os.path.join(os.path.abspath("."), filename)
+
 class GitHubReleaseManager:
     """
     A Tkinter application to download a specific release from a GitHub repository.
@@ -90,7 +96,7 @@ class GitHubReleaseManager:
         self.client_file = os.path.join("cache", "client.json")
         self.mbii_directory_file = os.path.join("cache", "mbiidirectory.json")
         # Music file is now expected in the root directory, not the cache
-        self.music_file = "music.mp3"
+        self.music_file = get_resource_path("music.mp3")
         
         # UI for loading screen
         self.loading_window = None
@@ -134,7 +140,7 @@ class GitHubReleaseManager:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         
         # --- Icon Loading Logic ---
-        icon_path_ico = os.path.join(script_dir, 'icon.ico')
+        icon_path_ico = get_resource_path("icon.ico")
         if os.path.exists(icon_path_ico):
             try:
                 self.master.iconbitmap(icon_path_ico)
@@ -143,7 +149,7 @@ class GitHubReleaseManager:
                 print("WARNING: 'icon.ico' found but failed to load. Skipping window icon.")
         else:
             try:
-                icon_path_png = os.path.join(script_dir, 'icon.png')
+                icon_path_png = get_resource_path("icon.png")
                 icon_image = Image.open(icon_path_png)
                 icon_photo = ImageTk.PhotoImage(icon_image)
                 self.master.iconphoto(True, icon_photo)
@@ -158,7 +164,7 @@ class GitHubReleaseManager:
         window_height = 351
         
         try:
-            image_path = os.path.join(script_dir, 'background.png')
+            image_path = get_resource_path("background.png")
             pil_image = Image.open(image_path)
             resized_image = pil_image.resize((window_width, window_height), Image.LANCZOS)
             self.bg_image_ref = ImageTk.PhotoImage(resized_image)
