@@ -33,11 +33,11 @@ class GitHubReleaseManager:
     """
     A Tkinter application to download a specific release from a GitHub repository.
     This version includes a custom, fully consistent dark theme, handles API rate limiting,
-    and now includes functionality to fetch a requirements.json file from a hardcoded repository on startup.
+    and now includes functionality to fetch a repositories.json file from a hardcoded repository on startup.
     It also now saves all user-generated files inside a 'cache' folder for better PyInstaller compatibility.
     """
 
-    HARDCODED_REQUIREMENTS_REPO_URL = "https://raw.githubusercontent.com/MBII-Galactic-Conquest/mbii-community-updater/main/requirements.json"
+    HARDCODED_REPOSITORIES_REPO_URL = "https://raw.githubusercontent.com/MBII-Galactic-Conquest/mbii-community-updater/main/repositories.json"
 
     def __init__(self, master):
         """
@@ -542,7 +542,7 @@ class GitHubReleaseManager:
         If that fails, it falls back to a local file in the cache directory.
         """
         try:
-            url = self.HARDCODED_REQUIREMENTS_REPO_URL
+            url = self.HARDCODED_REPOSITORIES_REPO_URL
             response = requests.get(url)
             response.raise_for_status()
             
