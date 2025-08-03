@@ -37,7 +37,7 @@ class GitHubReleaseManager:
     It also now saves all user-generated files inside a 'cache' folder for better PyInstaller compatibility.
     """
 
-    HARDCODED_REQUIREMENTS_REPO_URL = "https://raw.githubusercontent.com/MBII/Community-Updater/main/requirements.json"
+    HARDCODED_REQUIREMENTS_REPO_URL = "https://raw.githubusercontent.com/MBII-Galactic-Conquest/mbii-community-updater/main/requirements.json"
 
     def __init__(self, master):
         """
