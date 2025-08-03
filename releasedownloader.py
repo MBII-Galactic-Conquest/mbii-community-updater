@@ -483,21 +483,50 @@ class GitHubReleaseManager:
     def populate_repositories(self):
         """
         Clears and repopulates the Listbox with the current repositories.
-        The rate-limit check is now removed from this function to prevent startup spam.
+        The color of each item is based on the status of the last downloaded tag:
+        - Green: up-to-date
+        - Red: outdated
+        - Orange: processing (until checked)
+        - White: untouched / unknown
         """
         self.listbox_repos.delete(0, tk.END)
         for i, repo in enumerate(self.repositories):
             repo_name_display = repo.get('custom_name') or repo['url'].rstrip('/').split('/')[-1]
             self.listbox_repos.insert(tk.END, repo_name_display)
-            # Check for a previously downloaded tag to color the listbox item.
-            # This check is local and does not hit the GitHub API.
-            last_downloaded = self.client_data.get(repo['url'], {}).get('last_tag')
-            if last_downloaded:
-                self.listbox_repos.itemconfig(i, {'fg': 'green'})
+
+            url = repo.get('url')
+            last_tag = self.client_data.get(url, {}).get('last_tag')
+
+            # Default to white
+            color = "white"
+
+            if last_tag:
+                # Temporarily mark as processing (orange)
+                color = "orange"
+                self.listbox_repos.itemconfig(i, {'fg': color})
+
+                def update_color(index, repo_url, tag):
+                    try:
+                        parts = repo_url.rstrip('/').split('/')
+                        owner = parts[-2]
+                        repo_name = parts[-1]
+                        api_url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/latest"
+                        response = requests.get(api_url)
+                        response.raise_for_status()
+                        latest = response.json().get('tag_name')
+                        new_color = "green" if latest == tag else "red"
+                    except:
+                        new_color = "white"
+
+                    self.master.after(0, lambda: self.listbox_repos.itemconfig(index, {'fg': new_color}))
+
+                # Launch the check in a thread to avoid freezing the GUI
+                threading.Thread(target=update_color, args=(i, url, last_tag), daemon=True).start()
             else:
-                self.listbox_repos.itemconfig(i, {'fg': 'white'})
-        
+                self.listbox_repos.itemconfig(i, {'fg': color})
+
         self.reset_ui()
+
 
 
     def select_download_path(self):
