@@ -26,7 +26,11 @@
 >
 > </br>
 >
-> #5) All assets must be MBII related upon inspection.
+> #5) Ensure you have no stolen assets and provide an index of special thanks & credit attribution.
+>
+> </br>
+>
+> #6) All assets must be MBII related upon inspection.
 
 </br>
 </br>
