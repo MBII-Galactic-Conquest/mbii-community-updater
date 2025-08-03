@@ -1,0 +1,4 @@
+*.json
+cache/*
+!cache/.keep
+!repositories.json
