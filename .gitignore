@@ -1,5 +1,7 @@
 *.json
 cache/*
+build/*
+dist/*
 !cache/.keep
 !repositories.json
 cache/repositories.json

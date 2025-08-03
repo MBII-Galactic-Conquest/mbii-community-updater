@@ -280,7 +280,7 @@ class GitHubReleaseManager:
         self.release_version_combo.bind("<<ComboboxSelected>>", self.on_release_version_select)
 
         # Download Path Section
-        self.download_path_label = tk.Label(content_frame, text="Download Path:", bg=self.dark_background_color, fg=self.text_color, font=("Helvetica", 9, "bold"))
+        self.download_path_label = tk.Label(content_frame, text="MBII Folder Path:", bg=self.dark_background_color, fg=self.text_color, font=("Helvetica", 9, "bold"))
         self.download_path_label.grid(row=5, column=0, padx=5, pady=3, sticky="e")
         
         path_button_frame = tk.Frame(content_frame, bg=self.dark_background_color)
@@ -396,7 +396,7 @@ class GitHubReleaseManager:
         """Saves the current music settings to client_data and then to the file."""
         music_settings = self.client_data.get("music_settings", {})
         music_settings["auto_play"] = self.is_music_playing
-        music_settings["volume"] = mixer.music.get_volume() if mixer.get_init() else 0.5
+        music_settings["volume"] = mixer.music.get_volume() if mixer.get_init() else 0.16
         self.client_data["music_settings"] = music_settings
         self.save_client_data()
             
@@ -404,7 +404,7 @@ class GitHubReleaseManager:
         """Loads sound settings from `client.json` or uses defaults."""
         music_settings = self.client_data.get("music_settings", {})
         auto_play = music_settings.get("auto_play", True)
-        volume = music_settings.get("volume", 0.5)
+        volume = music_settings.get("volume", 0.16)
         
         if mixer.get_init():
             mixer.music.set_volume(max(0, min(1, volume)))
