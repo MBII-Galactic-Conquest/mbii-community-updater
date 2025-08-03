@@ -1,6 +1,6 @@
 > [!IMPORTANT]
 > [`** REQUIRES PYTHON 3.12.7+ **`](https://www.python.org/downloads/release/python-3127/)
-> `pip install -U requirements.txt`
+> </br>`pip install -U requirements.txt`
 
 </br>
 </br>
