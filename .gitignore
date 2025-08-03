@@ -2,3 +2,4 @@
 cache/*
 !cache/.keep
 !repositories.json
+cache/repositories.json
