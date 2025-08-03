@@ -52,11 +52,15 @@
 >
 > </br>
 >
-> #4) Create a fork of this repository.
+> #4) Ensure your .PK3s share static names or they will lose release sync, this is IMPORTANT.
 >
 > </br>
 >
-> #5) Edit `repositories.json` in the root working directory of the forked repository, fill out the following:
+> #5) Create a fork of this repository.
+>
+> </br>
+>
+> #6) Edit `repositories.json` in the root working directory of the forked repository, fill out the following:
 > ```
 > "name" - following the format of your repo URL, "{USER OR ORG}/{REPO NAME}"
 > "custom_name" - required, a brief name descriptor of your custom asset
@@ -68,8 +72,8 @@
 >
 > </br>
 >
-> #6) Push and commit your changes.
+> #7) Push and commit your changes.
 >
 > </br>
 >
-> #7) Open a pull request to the [`merge`](https://github.com/MBII-Galactic-Conquest/mbii-community-updater/tree/merge) branch of the [upstream](https://github.com/MBII-Galactic-Conquest/mbii-community-updater/) repository.
+> #8) Open a pull request to the [`merge`](https://github.com/MBII-Galactic-Conquest/mbii-community-updater/tree/merge) branch of the [upstream](https://github.com/MBII-Galactic-Conquest/mbii-community-updater/) repository.
