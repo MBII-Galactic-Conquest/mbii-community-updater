@@ -68,6 +68,7 @@
 > "url" - your URL to the repository, "https://github.com/{USER OR ORG}/{REPO NAME}"
 > 
 > ** RESPECT INDENTATION AND PROPERLY CLOSE BRACKETS AND PROPER CHARACTER ESCAPES **
+> ** MANAGE YOUR ENTRIES IN ALPHABETICAL ORDER **
 > ```
 >
 > </br>
