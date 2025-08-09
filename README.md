@@ -61,14 +61,34 @@
 > </br>
 >
 > #6) Edit `repositories.json` in the root working directory of the forked repository, fill out the following:
-> ```
+> ```lua
 > "name" - following the format of your repo URL, "{USER OR ORG}/{REPO NAME}"
 > "custom_name" - required, a brief name descriptor of your custom asset
 > "description" - description of your custom asset, default obtained by repository
 > "url" - your URL to the repository, "https://github.com/{USER OR ORG}/{REPO NAME}"
+> ```
+>
 > 
-> ** RESPECT INDENTATION AND PROPERLY CLOSE BRACKETS AND PROPER CHARACTER ESCAPES **
-> ** MANAGE YOUR ENTRIES IN ALPHABETICAL ORDER **
+> Respect indentation and properly close brackets, and ensure proper character escapes,</br>
+> Manage your entries in alphabetical order.
+>
+> </br>
+>
+> ```py
+> [
+>     {
+>         "name": "USERorORG/repository",
+>         "custom_name": "MyModName",
+>         "description": "My mod description",
+>         "url": "https://github.com/USERorORG/repository"
+>     },
+>     {
+>         "name": "USERorORG/repository",
+>         "custom_name": "MyModName",
+>         "description": "My mod description",
+>         "url": "https://github.com/USERorORG/repository"
+>     }
+> ]
 > ```
 >
 > </br>
