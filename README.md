@@ -2,6 +2,8 @@
 > [`** REQUIRES PYTHON 3.12.7+ **`](https://www.python.org/downloads/release/python-3127/)
 > </br>`pip install -U requirements.txt`
 
+![snapshot](https://github.com/MBII-Galactic-Conquest/mbii-community-updater/blob/main/.snapshot.png)
+
 </br>
 </br>
 
