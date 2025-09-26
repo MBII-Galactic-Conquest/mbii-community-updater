@@ -4,5 +4,6 @@ cache/*
 build/*
 dist/*
 !cache/.keep
+!cache/servers.json
 !repositories.json
 cache/repositories.json
