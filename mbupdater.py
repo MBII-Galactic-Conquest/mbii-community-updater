@@ -1218,7 +1218,7 @@ class ServerBrowser:
         self.current_master_url = MASTER_SERVERS["JKHubServers (AppSpot)"]
         self.servers = []
         self.filter_popup = None
-        self.mod_filter = 'All Mods'  # Start with All Mods to see everything first
+        self.mod_filter = 'Movie Battles II'  # Start with All Mods to see everything first
         
         # UI Setup
         self.window = tk.Toplevel(self.master)
