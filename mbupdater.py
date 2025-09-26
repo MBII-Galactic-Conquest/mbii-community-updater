@@ -52,6 +52,63 @@ def get_resource_path(filename):
         return os.path.join(sys._MEIPASS, filename)
     return os.path.join(os.path.abspath("."), filename)
 
+def extract_zip_contents(zip_data, target_directory):
+    """
+    Extracts the contents of a ZIP file, stripping the common root directory 
+    (e.g., 'MBII/') to prevent unwanted nested folders (e.g., /Target/MBII/MBII).
+    
+    Args:
+        zip_data (bytes): The content of the zip file as bytes.
+        target_directory (str): The final destination folder.
+    """
+    try:
+        # 1. Open the zip archive from the byte stream
+        with zipfile.ZipFile(io.BytesIO(zip_data), 'r') as zf:
+            
+            name_list = zf.namelist()
+            if not name_list:
+                return # Zip is empty
+
+            # 2. Identify the common root directory
+            # Finds the longest common prefix (e.g., 'MBII/').
+            root_dir = os.path.commonprefix(name_list)
+            
+            # Ensure the root_dir is a single-level directory name ending with a separator
+            # If the path is complicated (e.g., 'mod/MBII/'), we treat it as no root.
+            if not root_dir.endswith('/') or root_dir.count('/') > 1:
+                 # If no clear single root directory, set root_dir to empty
+                root_dir = ''
+
+            # 3. Extract all files, modifying the path
+            for member in name_list:
+                
+                # Calculate the new path by stripping the root directory
+                if root_dir and member.startswith(root_dir):
+                    # Strip the root directory (e.g., 'MBII/file' becomes 'file')
+                    arcname = member[len(root_dir):]
+                else:
+                    arcname = member
+                
+                # Skip empty paths (the root folder itself) or directories
+                if not arcname or arcname.endswith('/'):
+                    continue
+
+                # The full extraction path
+                dest_path = os.path.join(target_directory, arcname)
+                
+                # Ensure the target subdirectory exists
+                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                
+                # Extract the file content
+                with open(dest_path, 'wb') as outfile:
+                    outfile.write(zf.read(member))
+
+        print(f"Extraction successful: files extracted directly to {target_directory}.")
+
+    except Exception as e:
+        # Provide user feedback on the error
+        tk.messagebox.showerror("Extraction Error", f"Failed to extract content: {e}")
+
 # ====================================================================
 # NEW MASTER SERVER DEFINITIONS (Added per user request)
 # Note: Raw master server addresses (master.jkhub.org) typically return 
@@ -862,7 +919,7 @@ class GitHubReleaseManager:
     def _download_thread(self, url):
         """ The actual download and extraction logic. """
         try:
-            self.master.after(0, lambda: self.loading_label.config(text="Downloading file..."))
+            #self.master.after(0, lambda: self.loading_label.config(text="Downloading file..."))
             response = requests.get(url, stream=True)
             response.raise_for_status()
 
@@ -872,7 +929,7 @@ class GitHubReleaseManager:
             # Ensure the mod directory exists for extraction
             os.makedirs(mod_folder, exist_ok=True)
             
-            download_dir = os.path.join(self.download_path, self.current_repo_data.get('mod_path', 'MBII'))
+            download_dir = os.path.join(self.download_path)
 
             # Check if the file is a PK3 (single file) or a ZIP (archive)
             if filename.lower().endswith(".pk3"):
@@ -891,11 +948,9 @@ class GitHubReleaseManager:
 
             elif filename.lower().endswith(".zip"):
                 # ZIP: Extract contents to the download directory
-                self.master.after(0, lambda: self.loading_label.config(text="Extracting ZIP archive..."))
-                
-                # Use in-memory buffer for safety and speed
-                zip_file = zipfile.ZipFile(io.BytesIO(response.content))
-                zip_file.extractall(download_dir)
+                #self.master.after(0, lambda: self.loading_label.config(text="Extracting ZIP archive..."))
+
+                extract_zip_contents(response.content, download_dir)
 
                 self.master.after(0, self.hide_loading_popup)
                 self.master.after(0, lambda: self.show_custom_messagebox("Success", f"Successfully downloaded and extracted {filename} to {download_dir}.", icon_type='info'))
@@ -997,7 +1052,7 @@ class GitHubReleaseManager:
     def show_loading_popup(self):
         """ Creates a custom loading popup window. """
         self.loading_window = tk.Toplevel(self.master)
-        self.loading_window.title("Processing...")
+        self.loading_window.title("Downloading...")
         self.loading_window.geometry("300x100")
         self.loading_window.configure(bg=self.dark_background_color)
         self.loading_window.resizable(False, False)
@@ -1012,7 +1067,7 @@ class GitHubReleaseManager:
         y = self.master.winfo_y() + self.master.winfo_height() // 2 - 50
         self.loading_window.geometry(f'+{x}+{y}')
 
-        tk.Label(self.loading_window, text="Processing release...", font=("Helvetica", 12), bg=self.dark_background_color, fg=self.text_color).pack(pady=10)
+        tk.Label(self.loading_window, text="Downloading release...", font=("Helvetica", 12), bg=self.dark_background_color, fg=self.text_color).pack(pady=10)
         self.loading_label = tk.Label(self.loading_window, text=" | ", font=("Helvetica", 16, "bold"), bg=self.dark_background_color, fg=self.text_color)
         self.loading_label.pack(pady=5)
         
