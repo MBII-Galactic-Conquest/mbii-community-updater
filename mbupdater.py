@@ -298,13 +298,13 @@ class GitHubReleaseManager:
         self.download_path_var = tk.StringVar(self.master, value="Not Set")
         # String variable for the repository description
         self.description_var = tk.StringVar(self.master, value="Select a repository to see its description.")
-
-        # Initialize the pygame mixer
-        mixer.init()
-
+        
         # Music player state
         self.is_music_playing = False
 
+        # Initialize the pygame mixer
+        mixer.init()
+        
         self.create_widgets()
         
         # --- NEW STARTUP LOGIC: Fetch repositories first, then populate the UI ---
@@ -450,14 +450,6 @@ class GitHubReleaseManager:
         top_button_frame = tk.Frame(content_frame, bg=self.dark_background_color)
         # Use column 0, span 2 columns, at the very top (row 0)
         top_button_frame.grid(row=0, column=0, columnspan=2, pady=(10, 5), sticky="ew")
-        
-        # Function to handle button clicks (for now, just a placeholder)
-        def placeholder_action(button_name):
-            self.show_custom_messagebox(
-                f"{button_name} Feature",
-                f"The '{button_name}' feature is not yet implemented in this version.",
-                icon_type='info'
-            )
 
         def no_action(button_name):
             """A function that executes, but performs no operation."""
@@ -594,7 +586,6 @@ class GitHubReleaseManager:
             else:
                 self.repositories = []
                 self.master.after(0, lambda: self.status_label.config(text="No remote or local repository list found. Please check network.", fg="#e74c3c"))
-                # Capture 'e' with a default argument 'msg'
                 self.master.after(0, lambda msg=str(e): self.show_custom_messagebox("Repository List Warning", f"Could not fetch or find repositories.json.\nError: {msg}", icon_type='warning'))
 
             self.master.after(0, self.populate_repositories)
@@ -625,42 +616,17 @@ class GitHubReleaseManager:
         music_settings["volume"] = mixer.music.get_volume() if mixer.get_init() else 0.16
         self.client_data["music_settings"] = music_settings
         self.save_client_data()
-
+            
     def load_sound_settings(self):
         """Loads sound settings from `client.json` or uses defaults."""
         music_settings = self.client_data.get("music_settings", {})
         auto_play = music_settings.get("auto_play", True)
         volume = music_settings.get("volume", 0.16)
         
-        # --- CRITICAL FIX: Explicitly set the internal state first ---
-        self.is_music_playing = auto_play 
-
         if mixer.get_init():
             mixer.music.set_volume(max(0, min(1, volume)))
-            
-            # Load the music file, regardless of whether it's playing
-            if os.path.exists(self.music_file):
-                try:
-                    mixer.music.load(self.music_file)
-                except mixer.error as e:
-                    print(f"Failed to load music file on startup: {e}")
-                    self.is_music_playing = False
-                    
-            # ONLY start playback if auto_play was True
-            if self.is_music_playing:
-                try:
-                    mixer.music.play(-1)
-                except mixer.error:
-                    self.is_music_playing = False
-            else:
-                # If music should be off, ensure the mixer is stopped
-                mixer.music.stop()
-
-            # --- Set the button text to reflect the final determined state ---
-            if self.is_music_playing:
-                self.music_button.config(text="Music On")
-            else:
-                self.music_button.config(text="Music Off")
+            if auto_play and os.path.exists(self.music_file):
+                self.play_music()
 
     def play_music(self):
         """Plays the music.mp3 file if it exists."""
@@ -670,7 +636,7 @@ class GitHubReleaseManager:
                 mixer.music.play(-1)
                 self.is_music_playing = True
                 self.music_button.config(text="Music On")
-                # self.save_music_settings() # <--- REMOVED: This was causing the save loop on startup
+                self.save_music_settings()
             except mixer.error as e:
                 self.show_custom_messagebox("Music Error", f"Failed to play music file: {e}", icon_type='error')
                 self.is_music_playing = False
@@ -679,38 +645,40 @@ class GitHubReleaseManager:
             self.is_music_playing = False
             self.music_button.config(text="Music Off")
             self.show_custom_messagebox("File Not Found", f"Music file '{self.music_file}' not found.", icon_type='warning')
-
+            
     def toggle_music(self):
         """Toggles music playback on and off."""
         if self.is_music_playing:
             mixer.music.pause()
-            self.is_music_playing = False  # <-- Sets internal state to False
+            self.is_music_playing = False
             self.music_button.config(text="Music Off")
         else:
             if mixer.music.get_busy():
                 mixer.music.unpause()
             else:
                 self.play_music()
-            self.is_music_playing = True   # <-- Sets internal state to True
+            self.is_music_playing = True
             self.music_button.config(text="Music On")
         
-        self.save_music_settings()  # <-- Calls the function to save the new state
+        self.save_music_settings()
 
     def load_mbii_directory(self):
-        """ Loads the MBII directory from a local JSON file. """
+        """
+        Loads the MBII directory from a local JSON file.
+        """
         if os.path.exists(self.mbii_directory_file):
             try:
                 with open(self.mbii_directory_file, 'r') as f:
                     data = json.load(f)
-                path = data.get("path")
-                if path and os.path.isdir(path):
-                    self.download_path = path
-                    self.download_path_var.set(path)
-                    self.status_label.config(text=f"Loaded saved MBII directory.", fg="#3498db")
-                else:
-                    self.status_label.config(text="Saved MBII directory not found. Please select a new one.", fg="orange")
-                    self.download_path = None
-                    self.download_path_var.set("Not Set")
+                    path = data.get("path")
+                    if path and os.path.isdir(path):
+                        self.download_path = path
+                        self.download_path_var.set(path)
+                        self.status_label.config(text=f"Loaded saved MBII directory.", fg="#3498db")
+                    else:
+                        self.status_label.config(text="Saved MBII directory not found. Please select a new one.", fg="orange")
+                        self.download_path = None
+                        self.download_path_var.set("Not Set")
             except (IOError, json.JSONDecodeError):
                 self.download_path = None
                 self.download_path_var.set("Not Set")
@@ -718,6 +686,7 @@ class GitHubReleaseManager:
         else:
             self.download_path = None
             self.download_path_var.set("Not Set")
+        
         self.update_download_button_state()
 
     def save_mbii_directory(self, path):
@@ -729,20 +698,30 @@ class GitHubReleaseManager:
             self.show_custom_messagebox("Error", f"Could not save MBII directory to file: {e}", icon_type='error')
 
     def populate_repositories(self):
-        """ Clears and repopulates the Listbox with the current repositories. The color of each item is based on the status of the last downloaded tag: - Green: up-to-date - Red: outdated - Orange: processing (until checked) - White: untouched / unknown """
+        """
+        Clears and repopulates the Listbox with the current repositories.
+        The color of each item is based on the status of the last downloaded tag:
+        - Green: up-to-date
+        - Red: outdated
+        - Orange: processing (until checked)
+        - White: untouched / unknown
+        """
         self.listbox_repos.delete(0, tk.END)
         for i, repo in enumerate(self.repositories):
             repo_name_display = repo.get('custom_name') or repo['url'].rstrip('/').split('/')[-1]
             self.listbox_repos.insert(tk.END, repo_name_display)
+
             url = repo.get('url')
             last_tag = self.client_data.get(url, {}).get('last_tag')
+
             # Default to white
             color = "white"
+
             if last_tag:
                 # Temporarily mark as processing (orange)
                 color = "orange"
                 self.listbox_repos.itemconfig(i, {'fg': color})
-                
+
                 def update_color(index, repo_url, tag):
                     try:
                         parts = repo_url.rstrip('/').split('/')
@@ -755,13 +734,17 @@ class GitHubReleaseManager:
                         new_color = "green" if latest == tag else "red"
                     except:
                         new_color = "white"
-                    self.master.after(0, lambda idx=i, new_c=new_color: self.listbox_repos.itemconfig(idx, {'fg': new_c}))
-                
+
+                    self.master.after(0, lambda: self.listbox_repos.itemconfig(index, {'fg': new_color}))
+
                 # Launch the check in a thread to avoid freezing the GUI
                 threading.Thread(target=update_color, args=(i, url, last_tag), daemon=True).start()
             else:
                 self.listbox_repos.itemconfig(i, {'fg': color})
+
         self.reset_ui()
+
+
 
     def select_download_path(self):
         """Opens a file dialog for the user to select a download directory and validates it."""
@@ -778,21 +761,32 @@ class GitHubReleaseManager:
         self.update_download_button_state()
 
     def on_listbox_select(self, event):
-        """ Handles a repository selection, fetching its releases in a new thread. This is where the API call and rate-limit check now occur. """
-        if self.is_rate_limited: return
+        """
+        Handles a repository selection, fetching its releases in a new thread.
+        This is where the API call and rate-limit check now occur.
+        """
+        if self.is_rate_limited:
+            return
+
         selection = self.listbox_repos.curselection()
-        if not selection and self.selected_repo_url is not None: return
+        
+        if not selection and self.selected_repo_url is not None:
+            return
+        
         if not selection:
             self.reset_ui()
             return
+
         index = selection[0]
         self.current_repo_data = self.repositories[index]
         self.selected_repo_url = self.current_repo_data.get('url', '')
         description = self.current_repo_data.get('description', 'No description available.')
         self.description_var.set(description)
+        
         self.release_version_combo.set("Loading releases...")
         self.release_version_combo.config(state="disabled")
         self.selected_release_tag = None
+
         if self.selected_repo_url:
             try:
                 parts = self.selected_repo_url.rstrip('/').split('/')
@@ -805,252 +799,328 @@ class GitHubReleaseManager:
                 self.reset_ui()
                 self.selected_repo_url = None
                 return
-            self.status_label.config(text="Fetching releases...", fg="#3498db")
-            self.update_download_button_state()
-            self.update_remove_button_state()
-            # Fetch releases in a new thread to prevent the UI from freezing
-            threading.Thread(target=self.fetch_releases, daemon=True).start()
-        else:
-            self.reset_ui()
         
-    def fetch_releases(self):
-        """ Fetches the releases for the currently selected repository. """
-        if not self.selected_repo_url: return
+        self.status_label.config(text="Fetching releases...", fg="#3498db")
+        self.update_download_button_state()
+        self.update_remove_button_state()
+
+        # Fetch releases in a new thread to prevent the UI from freezing
+        threading.Thread(target=self.fetch_releases_for_repo, daemon=True).start()
+
+    def fetch_releases_for_repo(self):
+        """Fetches all releases for the selected repository and updates the dropdown."""
+        if self.is_rate_limited:
+            return
+            
         try:
             api_url = f"https://api.github.com/repos/{self.current_owner}/{self.current_repo}/releases"
             response = requests.get(api_url)
-            
-            if response.status_code == 403 and 'rate limit' in response.text.lower():
-                return self.master.after(0, self.handle_rate_limit)
-
             response.raise_for_status()
+            
             releases = response.json()
+            if not releases:
+                self.master.after(0, lambda: self.release_version_combo.config(values=["No releases found"], state="disabled"))
+                self.master.after(0, lambda: self.release_version_combo.set("No releases found"))
+                self.master.after(0, lambda: self.status_label.config(text="No releases found for this repository.", fg="#e74c3c"))
+                return
+
+            self.available_releases = {r['tag_name']: r for r in releases}
+            release_tags = [r['tag_name'] for r in releases]
             
-            self.available_releases = {}
-            for release in releases:
-                tag = release.get('tag_name')
-                asset_url = next((asset['browser_download_url'] for asset in release.get('assets', []) if asset['name'].endswith(('.zip', '.pk3'))), None)
-                if tag and asset_url:
-                    self.available_releases[tag] = asset_url
+            self.master.after(0, lambda: self.release_version_combo.config(values=release_tags, state="readonly"))
+            
+            if release_tags:
+                self.master.after(0, lambda: self.release_version_combo.set(release_tags[0]))
+                self.master.after(0, self.on_release_version_select)
+            else:
+                self.master.after(0, lambda: self.release_version_combo.set("No releases available"))
+                self.master.after(0, lambda: self.release_version_combo.config(state="disabled"))
 
-            self.master.after(0, self.populate_release_combo)
-
+            self.master.after(0, lambda: self.status_label.config(text=f"Releases loaded. Please select a version.", fg="#3498db"))
+            self.master.after(0, self.update_download_button_state)
+            
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 403:
+                self.master.after(0, self.handle_rate_limit)
+            else:
+                self.master.after(0, lambda: self.status_label.config(text=f"Error fetching releases: {e}", fg="#e74c3c"))
+                self.master.after(0, lambda: self.show_custom_messagebox("Network Error", f"Failed to get release list.\nError: {e}", icon_type='error'))
+                self.master.after(0, lambda: self.release_version_combo.set("Error fetching releases"))
+                self.master.after(0, lambda: self.release_version_combo.config(values=["Error fetching releases"], state="disabled"))
+                self.master.after(0, self.update_download_button_state)
         except requests.exceptions.RequestException as e:
-            # FIX: Capture 'e' using default argument 'error=e'
-            self.master.after(0, lambda error=e: self.status_label.config(text=f"Failed to fetch releases: {error}", fg="#e74c3c"))
-            self.master.after(0, self.reset_ui)
+            self.master.after(0, lambda: self.status_label.config(text=f"Error fetching releases: {e}", fg="#e74c3c"))
+            self.master.after(0, lambda: self.show_custom_messagebox("Network Error", f"Failed to get release list.\nError: {e}", icon_type='error'))
+            self.master.after(0, lambda: self.release_version_combo.set("Error fetching releases"))
+            self.master.after(0, lambda: self.release_version_combo.config(values=["Error fetching releases"], state="disabled"))
+            self.master.after(0, self.update_download_button_state)
 
-    def populate_release_combo(self):
-        """ Populates the release version combobox and selects the latest or previously downloaded version. """
-        tags = list(self.available_releases.keys())
-        if not tags:
-            self.release_version_combo['values'] = ['No releases found']
-            self.release_version_combo.set('No releases found')
-            self.release_version_combo.config(state="disabled")
-            self.status_label.config(text="No downloadable releases found.", fg="orange")
-            self.selected_release_tag = None
-        else:
-            self.release_version_combo['values'] = tags
-            last_tag = self.client_data.get(self.selected_repo_url, {}).get('last_tag')
-            
-            # Select the latest tag by default
-            selected_tag = tags[0]
-            
-            # If the last downloaded tag is still available, select it
-            if last_tag in tags:
-                selected_tag = last_tag
-                
-            self.release_version_combo.set(selected_tag)
+    def on_release_version_select(self, event=None):
+        """
+        Handles the selection of a new release version from the dropdown.
+        """
+        selected_tag = self.release_version_combo.get()
+        if selected_tag in self.available_releases:
             self.selected_release_tag = selected_tag
-            self.release_version_combo.config(state="readonly")
-            self.status_label.config(text=f"Ready. Selected: {selected_tag}", fg="#4CAF50")
-            
+            self.status_label.config(text=f"Selected release version: {selected_tag}. Ready to download.", fg="#3498db")
+        else:
+            self.selected_release_tag = None
+            self.status_label.config(text="No valid release version selected.", fg="#e74c3c")
         self.update_download_button_state()
-
-    def on_release_version_select(self, event):
-        """ Handles a release version selection. """
-        self.selected_release_tag = self.release_version_combo.get()
-        self.status_label.config(text=f"Selected: {self.selected_release_tag}", fg="#4CAF50")
-        self.update_download_button_state()
-
+        
     def update_download_button_state(self):
-        """ Updates the state of the Download button. """
-        if self.download_path and self.selected_release_tag and self.selected_release_tag not in ["Loading releases...", "No releases found"]:
+        """Updates the download button state based on all prerequisites being met."""
+        is_repo_selected = self.selected_repo_url is not None
+        is_version_selected = self.selected_release_tag is not None
+        is_path_valid = self.download_path is not None and os.path.isdir(self.download_path) and 'MBII' in self.download_path.upper()
+        
+        if is_repo_selected and is_version_selected and is_path_valid:
             self.download_button.config(state="normal")
         else:
             self.download_button.config(state="disabled")
 
     def update_remove_button_state(self):
-        """ Updates the state of the Remove button. """
-        if self.download_path and self.selected_repo_url:
-            last_tag = self.client_data.get(self.selected_repo_url, {}).get('last_tag')
-            if last_tag:
-                self.remove_button.config(state="normal")
-                return
-        self.remove_button.config(state="disabled")
+        """Updates the remove button state based on whether files are recorded for the current repo."""
+        if self.selected_repo_url and self.selected_repo_url in self.client_data and self.client_data[self.selected_repo_url].get('file_list'):
+            self.remove_button.config(state="normal")
+        else:
+            self.remove_button.config(state="disabled")
 
-    def reset_ui(self):
-        """ Resets the UI elements to their default state after a selection or error. """
-        self.release_version_combo.set('Please select a repository...')
-        self.release_version_combo.config(state="disabled")
-        self.description_var.set("Select a repository to see its description.")
-        self.selected_release_tag = None
-        self.update_download_button_state()
-        self.update_remove_button_state()
-        
     def on_download(self):
-        """ Initiates the download process in a new thread. """
-        if not self.download_path:
-            self.show_custom_messagebox("Error", "Please select your MBII folder path first.", icon_type='error')
-            return
-        if not self.selected_release_tag:
-            self.show_custom_messagebox("Error", "Please select a release version.", icon_type='error')
-            return
-            
-        download_url = self.available_releases.get(self.selected_release_tag)
-        if not download_url:
-            self.show_custom_messagebox("Error", f"Could not find download URL for tag {self.selected_release_tag}.", icon_type='error')
+        """Starts the download process in a separate thread."""
+        if not self.download_path or 'MBII' not in self.download_path.upper():
+            self.show_custom_messagebox("Error", "Please select a valid MBII Directory first.", icon_type='error')
             return
 
-        self.show_loading_popup()
-        self.download_button.config(state="disabled")
-        threading.Thread(target=self._download_thread, args=(download_url,), daemon=True).start()
+        if not self.selected_release_tag or self.selected_release_tag not in self.available_releases:
+            self.show_custom_messagebox("Error", "Please select a release version to download.", icon_type='error')
+            return
 
-    def _download_thread(self, url):
-        """ The actual download and extraction logic. """
+        self.download_button.config(state=tk.DISABLED)
+        self.remove_button.config(state=tk.DISABLED)
+        self.status_label.config(text=f"Starting download for '{self.current_repo}' version '{self.selected_release_tag}'...", fg="#3498db")
+        
+        self.create_loading_window()
+        threading.Thread(target=self.download_release_by_tag, daemon=True).start()
+
+    def download_release_by_tag(self):
+        """Downloads and extracts the selected release from GitHub."""
         try:
-            #self.master.after(0, lambda: self.loading_label.config(text="Downloading file..."))
-            response = requests.get(url, stream=True)
-            response.raise_for_status()
-
-            filename = url.split('/')[-1]
-            mod_folder = os.path.join(self.download_path, self.current_repo)
-            
-            # Ensure the mod directory exists for extraction
-            os.makedirs(mod_folder, exist_ok=True)
-            
-            download_dir = os.path.join(self.download_path)
-
-            # Check if the file is a PK3 (single file) or a ZIP (archive)
-            if filename.lower().endswith(".pk3"):
-                # PK3: Save directly to the mod directory
-                filepath = os.path.join(download_dir, filename)
-                self.master.after(0, lambda: self.loading_label.config(text=f"Saving {filename} to {download_dir}..."))
-                with open(filepath, 'wb') as file:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        file.write(chunk)
-                
-                # Check for existing pk3 and remove
-                self.remove_previous_file(download_dir, filename)
-
-                self.master.after(0, self.hide_loading_popup)
-                self.master.after(0, lambda: self.show_custom_messagebox("Success", f"Successfully downloaded and saved {filename}.", icon_type='info'))
-
-            elif filename.lower().endswith(".zip"):
-                # ZIP: Extract contents to the download directory
-                #self.master.after(0, lambda: self.loading_label.config(text="Extracting ZIP archive..."))
-
-                extract_zip_contents(response.content, download_dir)
-
-                self.master.after(0, self.hide_loading_popup)
-                self.master.after(0, lambda: self.show_custom_messagebox("Success", f"Successfully downloaded and extracted {filename} to {download_dir}.", icon_type='info'))
-
-            else:
-                self.master.after(0, self.hide_loading_popup)
-                self.master.after(0, lambda: self.show_custom_messagebox("Error", f"Unsupported file type: {filename}. Only .zip and .pk3 are supported.", icon_type='error'))
+            release_data = self.available_releases.get(self.selected_release_tag)
+            if not release_data:
+                self.master.after(0, lambda: self.status_label.config(text="Error: Could not find release data.", fg="#e74c3c"))
                 return
 
-            # Update client data on successful download
+            assets = release_data.get('assets', [])
+            zip_asset = next((asset for asset in assets if asset['name'].endswith('.zip')), None)
+
+            if not zip_asset:
+                self.master.after(0, lambda: self.status_label.config(text="Error: No .zip release asset found for this version.", fg="#e74c3c"))
+                return
+            
+            asset_name = zip_asset['name']
+            download_url = zip_asset['browser_download_url']
+            
+            self.master.after(0, lambda: self.status_label.config(text=f"Downloading '{asset_name}'...", fg="#3498db"))
+            
+            file_response = requests.get(download_url, stream=True)
+            file_response.raise_for_status()
+
+            zip_in_memory = io.BytesIO(file_response.content)
+
+            self.master.after(0, lambda: self.status_label.config(text=f"Extracting '{asset_name}'...", fg="#3498db"))
+            
+            file_list = []
+            with zipfile.ZipFile(zip_in_memory, 'r') as zip_ref:
+                file_list = zip_ref.namelist()
+                zip_ref.extractall(self.download_path)
+            
             self.client_data[self.selected_repo_url] = {
                 'last_tag': self.selected_release_tag,
-                'last_file': filename,
-                'path': download_dir
+                'file_list': file_list
             }
             self.save_client_data()
-            self.master.after(0, self.populate_repositories) # Refresh colors in main listbox
 
-        except requests.exceptions.RequestException as e:
-            self.master.after(0, self.hide_loading_popup)
-            # FIX: Capture 'e' using default argument 'error=e'
-            self.master.after(0, lambda error=e: self.show_custom_messagebox("Download Error", f"Failed to download file: {error}", icon_type='error'))
-        except Exception as e:
-            self.master.after(0, self.hide_loading_popup)
-            # FIX: Capture 'e' using default argument 'error=e'
-            self.master.after(0, lambda error=e: self.show_custom_messagebox("Extraction Error", f"An error occurred during file handling: {error}", icon_type='error'))
-        finally:
-            self.master.after(0, lambda: self.download_button.config(state="normal"))
-            self.master.after(0, self.update_download_button_state)
-
-    def remove_previous_file(self, target_dir, new_filename):
-        """ Removes the previously downloaded file/folder if a new one is a single PK3."""
-        # This is primarily for PK3 files where only one version should exist.
-        if new_filename.lower().endswith('.pk3'):
-            last_file = self.client_data.get(self.selected_repo_url, {}).get('last_file')
-            if last_file and last_file != new_filename:
-                old_filepath = os.path.join(target_dir, last_file)
-                if os.path.exists(old_filepath):
-                    try:
-                        os.remove(old_filepath)
-                    except OSError as e:
-                        print(f"Warning: Could not remove old file {old_filepath}: {e}")
-            
-    def on_remove(self):
-        """ Prompts the user and removes the last downloaded content. """
-        if not self.selected_repo_url or not self.download_path:
-            return
-
-        repo_info = self.client_data.get(self.selected_repo_url, {})
-        last_tag = repo_info.get('last_tag')
-        last_file = repo_info.get('last_file')
-        mod_path = repo_info.get('path')
-        
-        if not last_tag or not mod_path:
-            self.show_custom_messagebox("Error", "No prior download record found to remove.", icon_type='error')
-            self.update_remove_button_state()
-            return
-            
-        repo_name = self.current_repo_data.get('custom_name') or self.current_repo
-        
-        if last_file and last_file.lower().endswith('.pk3'):
-            # PK3: remove single file
-            removal_target = os.path.join(mod_path, last_file)
-            message = f"Are you sure you want to remove the single file **{last_file}** for **{repo_name}** from **{mod_path}**?"
-            is_file = True
-        else:
-            # ZIP: remove the entire directory (assuming ZIPs extract to a folder named after the repo)
-            removal_target = mod_path
-            message = f"Are you sure you want to remove the entire content folder for **{repo_name}** at **{mod_path}**? This will delete the entire directory."
-            is_file = False
-            
-        # Use a custom confirmation dialog
-        if self.show_custom_confirmation("Confirm Removal", message):
-            self.remove_button.config(state="disabled")
-            threading.Thread(target=self._remove_thread, args=(removal_target, is_file), daemon=True).start()
-            
-    def _remove_thread(self, target, is_file):
-        """ Executes the removal process. """
-        try:
-            if os.path.exists(target):
-                if is_file:
-                    os.remove(target)
-                else:
-                    shutil.rmtree(target)
-            
-            # Clear the record from client data
-            if self.selected_repo_url in self.client_data:
-                del self.client_data[self.selected_repo_url]
-                self.save_client_data()
-                
-            self.master.after(0, lambda: self.show_custom_messagebox("Success", f"Successfully removed content: {os.path.basename(target)}", icon_type='info'))
-            self.master.after(0, self.populate_repositories) # Refresh colors
-            
-        except OSError as e:
-            self.master.after(0, lambda error=e: self.show_custom_messagebox("Removal Error", f"Failed to remove content: {error}", icon_type='error'))
-        finally:
+            self.master.after(0, lambda: self.status_label.config(text=f"Download and extraction complete!", fg="#4CAF50"))
+            self.master.after(0, lambda: self.show_custom_messagebox("Success", f"Download and extraction complete! Files saved to:\n{self.download_path}", icon_type='info'))
+            self.master.after(0, self.populate_repositories)
             self.master.after(0, self.update_remove_button_state)
 
-    def show_loading_popup(self):
-        """ Creates a custom loading popup window. """
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 403:
+                self.master.after(0, self.handle_rate_limit)
+            else:
+                self.master.after(0, lambda: self.status_label.config(text=f"Network Error: {e}", fg="#e74c3c"))
+                self.master.after(0, lambda: self.show_custom_messagebox("Network Error", f"Failed to download the release. Please check the URL and your internet connection.\nError: {e}", icon_type='error'))
+        except requests.exceptions.RequestException as e:
+            self.master.after(0, lambda: self.status_label.config(text=f"Network Error: {e}", fg="#e74c3c"))
+            self.master.after(0, lambda: self.show_custom_messagebox("Network Error", f"Failed to download the release. Please check the URL and your internet connection.\nError: {e}", icon_type='error'))
+        except zipfile.BadZipFile:
+            self.master.after(0, lambda: self.status_label.config(text="Error: The downloaded file is not a valid zip archive.", fg="#e74c3c"))
+            self.master.after(0, lambda: self.show_custom_messagebox("Extraction Error", "The downloaded file is not a valid zip archive.", icon_type='error'))
+        except Exception as e:
+            self.master.after(0, lambda: self.status_label.config(text=f"An unexpected error occurred: {e}", fg="#e74c3c"))
+            self.master.after(0, lambda: self.show_custom_messagebox("Error", f"An unexpected error occurred: {e}", icon_type='error'))
+        finally:
+            if self.loading_window and self.loading_window.winfo_exists():
+                self.master.after_cancel(self.loading_animation)
+                self.loading_window.destroy()
+            self.master.after(0, self.update_download_button_state)
+
+    def on_remove(self):
+        """Removes the downloaded files from the last installed release and updates the UI."""
+        if not self.selected_repo_url:
+            self.show_custom_messagebox("Error", "Please select a repository first.", icon_type='error')
+            return
+
+        if self.selected_repo_url not in self.client_data or 'file_list' not in self.client_data[self.selected_repo_url]:
+            self.show_custom_messagebox("No Files Found", f"No downloaded files recorded for this repository.", icon_type='info')
+            return
+
+        file_list_to_delete = self.client_data[self.selected_repo_url]['file_list']
+
+        response = self.ask_custom_yesno(
+            "Confirm Deletion",
+            f"WARNING: This will attempt to delete all {len(file_list_to_delete)} files associated with this release. Proceed?"
+        )
+        
+        if not response:
+            return
+
+        self.status_label.config(text="Removing files...", fg="#3498db")
+        errors = []
+
+        for filename in file_list_to_delete:
+            full_path = os.path.join(self.download_path, filename)
+            try:
+                if os.path.isfile(full_path):
+                    os.remove(full_path)
+                elif os.path.isdir(full_path):
+                    shutil.rmtree(full_path)
+            except OSError as e:
+                errors.append(f"Could not delete '{full_path}': {e}")
+        
+        del self.client_data[self.selected_repo_url]
+        self.save_client_data()
+
+        self.populate_repositories()
+        self.update_remove_button_state()
+        self.reset_ui()
+        
+        if errors:
+            self.show_custom_messagebox("Deletion with Errors", f"Files removed, but some errors occurred:\n\n" + "\n".join(errors), icon_type='warning')
+        else:
+            self.show_custom_messagebox("Success", "All associated files have been removed.", icon_type='info')
+        self.status_label.config(text="File removal complete.", fg="#4CAF50")
+        
+    def reset_ui(self):
+        """Resets the UI to its initial state."""
+        self.listbox_repos.selection_clear(0, tk.END)
+        self.selected_repo_url = None
+        self.selected_release_tag = None
+        self.release_version_combo['state'] = 'disabled'
+        self.release_version_combo['values'] = ['Please select a repository...']
+        self.release_version_combo.set('Please select a repository...')
+        self.update_download_button_state()
+        self.update_remove_button_state()
+        self.status_label.config(text="", fg="#3498db")
+        self.description_var.set("Select a repository to see its description.")
+
+    # ====================================================================
+    # Custom Themed Pop-up Windows
+    # ====================================================================
+
+    def show_custom_messagebox(self, title, message, icon_type='info'):
+        """Creates and shows a custom-themed message box."""
+        popup = tk.Toplevel(self.master)
+        popup.title(title)
+        popup.configure(bg=self.dark_background_color)
+        popup.resizable(False, False)
+        popup.grab_set()
+        
+        if self.icon_path_ico:
+            popup.iconbitmap(self.icon_path_ico)
+            
+        x = self.master.winfo_x() + self.master.winfo_width() // 2 - 150
+        y = self.master.winfo_y() + self.master.winfo_height() // 2 - 50
+        popup.geometry(f'+{x}+{y}')
+
+        frame = tk.Frame(popup, bg=self.dark_background_color, padx=20, pady=20)
+        frame.pack(expand=True, fill="both")
+        
+        # Determine icon and color based on type
+        if icon_type == 'error':
+            icon_text = "❌"
+            icon_color = "#e74c3c"
+        elif icon_type == 'warning':
+            icon_text = "⚠"
+            icon_color = "orange"
+        else: # info
+            icon_text = "ⓘ"
+            icon_color = "#3498db"
+
+        icon_label = tk.Label(frame, text=icon_text, font=("Helvetica", 20, "bold"), bg=self.dark_background_color, fg=icon_color)
+        icon_label.pack(side=tk.LEFT, padx=(0, 10))
+
+        message_label = tk.Label(frame, text=message, font=("Helvetica", 10), bg=self.dark_background_color, fg=self.text_color, wraplength=250, justify="left")
+        message_label.pack(side=tk.LEFT, fill="both", expand=True)
+
+        ok_button = tk.Button(popup, text="OK", command=popup.destroy, bg=self.border_color, fg=self.text_color, activebackground=self.highlight_color, relief="raised", font=("Helvetica", 9, "bold"))
+        ok_button.pack(pady=(0, 10))
+        ok_button.bind("<Enter>", lambda e: e.widget.configure(bg=self.highlight_color))
+        ok_button.bind("<Leave>", lambda e: e.widget.configure(bg=self.border_color))
+        
+        popup.wait_window()
+
+    def ask_custom_yesno(self, title, message):
+        """Creates a custom-themed yes/no message box."""
+        self.result = None
+        
+        popup = tk.Toplevel(self.master)
+        popup.title(title)
+        popup.configure(bg=self.dark_background_color)
+        popup.resizable(False, False)
+        popup.grab_set()
+        
+        if self.icon_path_ico:
+            popup.iconbitmap(self.icon_path_ico)
+            
+        x = self.master.winfo_x() + self.master.winfo_width() // 2 - 150
+        y = self.master.winfo_y() + self.master.winfo_height() // 2 - 50
+        popup.geometry(f'+{x}+{y}')
+
+        frame = tk.Frame(popup, bg=self.dark_background_color, padx=20, pady=20)
+        frame.pack(expand=True, fill="both")
+        
+        # Use a question mark icon for yes/no prompts
+        icon_label = tk.Label(frame, text="❔", font=("Helvetica", 20, "bold"), bg=self.dark_background_color, fg="#3498db")
+        icon_label.pack(side=tk.LEFT, padx=(0, 10))
+
+        message_label = tk.Label(frame, text=message, font=("Helvetica", 10), bg=self.dark_background_color, fg=self.text_color, wraplength=250, justify="left")
+        message_label.pack(side=tk.LEFT, fill="both", expand=True)
+
+        def set_result(value):
+            self.result = value
+            popup.destroy()
+
+        button_frame = tk.Frame(popup, bg=self.dark_background_color)
+        button_frame.pack(pady=(0, 10))
+        
+        yes_button = tk.Button(button_frame, text="Yes", command=lambda: set_result(True), bg="#4CAF50", fg=self.text_color, activebackground="#45a049", relief="raised", font=("Helvetica", 9, "bold"))
+        yes_button.pack(side=tk.LEFT, padx=5)
+        yes_button.bind("<Enter>", lambda e: e.widget.configure(bg="#45a049"))
+        yes_button.bind("<Leave>", lambda e: e.widget.configure(bg="#4CAF50"))
+
+        no_button = tk.Button(button_frame, text="No", command=lambda: set_result(False), bg="#e74c3c", fg=self.text_color, activebackground="#c0392b", relief="raised", font=("Helvetica", 9, "bold"))
+        no_button.pack(side=tk.LEFT, padx=5)
+        no_button.bind("<Enter>", lambda e: e.widget.configure(bg="#c0392b"))
+        no_button.bind("<Leave>", lambda e: e.widget.configure(bg="#e74c3c"))
+        
+        popup.wait_window()
+        return self.result
+
+    def create_loading_window(self):
+        """Creates and shows a loading popup window with a custom theme."""
         self.loading_window = tk.Toplevel(self.master)
         self.loading_window.title("Downloading...")
         self.loading_window.geometry("300x100")
@@ -1062,7 +1132,6 @@ class GitHubReleaseManager:
         if self.icon_path_ico:
             self.loading_window.iconbitmap(self.icon_path_ico)
             
-        # Center the popup relative to the main window
         x = self.master.winfo_x() + self.master.winfo_width() // 2 - 150
         y = self.master.winfo_y() + self.master.winfo_height() // 2 - 50
         self.loading_window.geometry(f'+{x}+{y}')
@@ -1076,106 +1145,8 @@ class GitHubReleaseManager:
     def update_spinner(self):
         """Updates the spinner text on the loading label."""
         if self.loading_window and self.loading_window.winfo_exists():
-            next_frame = next(self.spinner)
-            self.loading_label.config(text=f" {next_frame} ")
-            self.loading_window.after(100, self.update_spinner)
-    
-    def hide_loading_popup(self):
-        """ Destroys the custom loading popup. """
-        if self.loading_window and self.loading_window.winfo_exists():
-            self.loading_window.destroy()
-
-    def show_custom_messagebox(self, title, message, icon_type='info', parent=None):
-        """ Creates a custom themed message box. """
-        parent_window = parent if parent else self.master
-        message_window = tk.Toplevel(parent_window)
-        message_window.title(title)
-        message_window.configure(bg=self.dark_background_color)
-        message_window.resizable(False, False)
-        message_window.grab_set()
-        
-        if self.icon_path_ico:
-            message_window.iconbitmap(self.icon_path_ico)
-            
-        # Icon representation
-        icon_map = {'info': 'ℹ️', 'warning': '⚠️', 'error': '❌'}
-        icon = icon_map.get(icon_type, '❓')
-        
-        # Icon Frame
-        icon_frame = tk.Frame(message_window, bg=self.dark_background_color)
-        icon_frame.pack(padx=15, pady=15, fill="x")
-        
-        tk.Label(icon_frame, text=icon, font=("Helvetica", 18), bg=self.dark_background_color).pack(side=tk.LEFT, padx=(0, 10))
-        
-        # Message Label
-        tk.Label(icon_frame, text=message, wraplength=350, justify=tk.LEFT, bg=self.dark_background_color, fg=self.text_color).pack(side=tk.LEFT, fill="x", expand=True)
-        
-        # OK Button
-        ok_button = tk.Button(message_window, text="OK", command=message_window.destroy, bg=self.border_color, fg=self.text_color, activebackground=self.highlight_color, relief="raised", font=("Helvetica", 10, "bold"))
-        ok_button.pack(pady=(0, 10), padx=10)
-        message_window.bind('<Return>', lambda event=None: message_window.destroy())
-        
-        # Calculate approximate centered position
-        message_window.update_idletasks()
-        w = message_window.winfo_reqwidth()
-        h = message_window.winfo_reqheight()
-        x = parent_window.winfo_x() + parent_window.winfo_width() // 2 - w // 2
-        y = parent_window.winfo_y() + parent_window.winfo_height() // 2 - h // 2
-        message_window.geometry(f'+{x}+{y}')
-        
-        message_window.transient(parent_window)
-        message_window.wait_window()
-        
-    def show_custom_confirmation(self, title, message):
-        """ Creates a custom themed confirmation box (Yes/No). """
-        result = tk.BooleanVar(self.master, value=False)
-        
-        confirm_window = tk.Toplevel(self.master)
-        confirm_window.title(title)
-        confirm_window.configure(bg=self.dark_background_color)
-        confirm_window.resizable(False, False)
-        confirm_window.grab_set()
-        
-        if self.icon_path_ico:
-            confirm_window.iconbitmap(self.icon_path_ico)
-            
-        def on_yes():
-            result.set(True)
-            confirm_window.destroy()
-            
-        def on_no():
-            result.set(False)
-            confirm_window.destroy()
-
-        # Icon and Message Frame
-        msg_frame = tk.Frame(confirm_window, bg=self.dark_background_color)
-        msg_frame.pack(padx=15, pady=15, fill="x")
-        
-        tk.Label(msg_frame, text="❓", font=("Helvetica", 18), bg=self.dark_background_color).pack(side=tk.LEFT, padx=(0, 10))
-        tk.Label(msg_frame, text=message, wraplength=350, justify=tk.LEFT, bg=self.dark_background_color, fg=self.text_color).pack(side=tk.LEFT, fill="x", expand=True)
-
-        # Button Frame
-        button_frame = tk.Frame(confirm_window, bg=self.dark_background_color)
-        button_frame.pack(pady=(0, 10), padx=10)
-        
-        yes_button = tk.Button(button_frame, text="Yes", command=on_yes, bg="#e74c3c", fg=self.text_color, activebackground="#c0392b", relief="raised", font=("Helvetica", 10, "bold"))
-        yes_button.pack(side=tk.LEFT, padx=5)
-        
-        no_button = tk.Button(button_frame, text="No", command=on_no, bg=self.border_color, fg=self.text_color, activebackground=self.highlight_color, relief="raised", font=("Helvetica", 10, "bold"))
-        no_button.pack(side=tk.LEFT, padx=5)
-        
-        # Center the popup
-        confirm_window.update_idletasks()
-        w = confirm_window.winfo_reqwidth()
-        h = confirm_window.winfo_reqheight()
-        x = self.master.winfo_x() + self.master.winfo_width() // 2 - w // 2
-        y = self.master.winfo_y() + self.master.winfo_height() // 2 - h // 2
-        confirm_window.geometry(f'+{x}+{y}')
-        
-        confirm_window.transient(self.master)
-        confirm_window.wait_window()
-        
-        return result.get()
+            self.loading_label.config(text=f' {next(self.spinner)} ')
+            self.loading_animation = self.master.after(100, self.update_spinner)
 
     def open_server_browser(self):
         """Opens the Server Browser window."""
