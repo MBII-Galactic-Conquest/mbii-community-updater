@@ -2,6 +2,8 @@
 > [`** REQUIRES PYTHON 3.12.7+ **`](https://www.python.org/downloads/release/python-3127/)
 > </br>`pip install -U requirements.txt`
 
+![snapshot](https://github.com/MBII-Galactic-Conquest/mbii-community-updater/blob/main/.snapshot.png)
+
 </br>
 </br>
 
@@ -61,19 +63,55 @@
 > </br>
 >
 > #6) Edit `repositories.json` in the root working directory of the forked repository, fill out the following:
-> ```
+> ```lua
 > "name" - following the format of your repo URL, "{USER OR ORG}/{REPO NAME}"
 > "custom_name" - required, a brief name descriptor of your custom asset
 > "description" - description of your custom asset, default obtained by repository
 > "url" - your URL to the repository, "https://github.com/{USER OR ORG}/{REPO NAME}"
+> ```
 > 
-> ** RESPECT INDENTATION AND PROPERLY CLOSE BRACKETS AND PROPER CHARACTER ESCAPES **
+> </br>
+> 
+> Respect indentation and properly close brackets, and ensure proper character escapes,</br>
+> Manage your entries in alphabetical order.
+>
+> </br>
+>
+> ```py
+> [
+>     {
+>         "name": "USERorORG/repository",
+>         "custom_name": "MyModName",
+>         "description": "My mod description",
+>         "url": "https://github.com/USERorORG/repository"
+>     },
+>     {
+>         "name": "USERorORG/repository",
+>         "custom_name": "MyModName",
+>         "description": "My mod description",
+>         "url": "https://github.com/USERorORG/repository"
+>     }
+> ]
 > ```
 >
 > </br>
 >
-> #7) Push and commit your changes.
+> **(OPTIONAL)**</br>
+> #7) Edit `servers.json` in the root working directory of the forked repository, fill out the following:
+> ```lua
+> {
+>	"server_name": "custom_name"
+>	-- ensuring the custom_name for content matches the server name in browser entry, in most cases they will usually be named the same
+>	-- the server name is not strict, but instead looks for your addon in string of server names, best to not hardcode server names to your addons
+>	- example: "Supremacy": "Supremacy"
+> }
+> ```
+> This will allow content creators to add their addons in the server names of scraped servers, allowing complete addon sync.
 >
 > </br>
 >
-> #8) Open a pull request to the [`merge`](https://github.com/MBII-Galactic-Conquest/mbii-community-updater/tree/merge) branch of the [upstream](https://github.com/MBII-Galactic-Conquest/mbii-community-updater/) repository.
+> #8) Push and commit your changes.
+>
+> </br>
+>
+> #9) Open a pull request to the [`merge`](https://github.com/MBII-Galactic-Conquest/mbii-community-updater/tree/merge) branch of the [upstream](https://github.com/MBII-Galactic-Conquest/mbii-community-updater/) repository.
