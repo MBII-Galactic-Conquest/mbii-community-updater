@@ -69,7 +69,8 @@
 > "description" - description of your custom asset, default obtained by repository
 > "url" - your URL to the repository, "https://github.com/{USER OR ORG}/{REPO NAME}"
 > ```
->
+> 
+> </br>
 > 
 > Respect indentation and properly close brackets, and ensure proper character escapes,</br>
 > Manage your entries in alphabetical order.
@@ -95,8 +96,22 @@
 >
 > </br>
 >
-> #7) Push and commit your changes.
+> **(OPTIONAL)**</br>
+> #7) Edit `servers.json` in the root working directory of the forked repository, fill out the following:
+> ```lua
+> {
+>	"server_name": "custom_name"
+>	-- ensuring the custom_name for content matches the server name in browser entry, in most cases they will usually be named the same
+>	-- the server name is not strict, but instead looks for your addon in string of server names, best to not hardcode server names to your addons
+>	- example: "Supremacy": "Supremacy"
+> }
+> ```
+> This will allow content creators to add their addons in the server names of scraped servers, allowing complete addon sync.
 >
 > </br>
 >
-> #8) Open a pull request to the [`merge`](https://github.com/MBII-Galactic-Conquest/mbii-community-updater/tree/merge) branch of the [upstream](https://github.com/MBII-Galactic-Conquest/mbii-community-updater/) repository.
+> #8) Push and commit your changes.
+>
+> </br>
+>
+> #9) Open a pull request to the [`merge`](https://github.com/MBII-Galactic-Conquest/mbii-community-updater/tree/merge) branch of the [upstream](https://github.com/MBII-Galactic-Conquest/mbii-community-updater/) repository.
