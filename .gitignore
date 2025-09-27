@@ -7,3 +7,4 @@ dist/*
 !repositories.json
 !servers.json
 cache/repositories.json
+cache/servers.json
