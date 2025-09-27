@@ -52,6 +52,17 @@ def get_resource_path(filename):
         return os.path.join(sys._MEIPASS, filename)
     return os.path.join(os.path.abspath("."), filename)
 
+def read_json_file(file_path):
+    """Safely reads a JSON file."""
+    if not os.path.exists(file_path):
+        return None
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error reading JSON file {file_path}: {e}")
+        return None
+
 def extract_zip_contents(zip_data, target_directory):
     """
     Extracts the contents of a ZIP file, stripping the common root directory 
@@ -110,10 +121,7 @@ def extract_zip_contents(zip_data, target_directory):
         tk.messagebox.showerror("Extraction Error", f"Failed to extract content: {e}")
 
 # ====================================================================
-# NEW MASTER SERVER DEFINITIONS (Added per user request)
-# Note: Raw master server addresses (master.jkhub.org) typically return 
-# a binary protocol response, not JSON. The code will handle the error 
-# if you use these, suggesting you stick to the JSON API.
+# NEW MASTER SERVER DEFINITIONS
 # ====================================================================
 
 MASTER_SERVERS = {
@@ -159,23 +167,18 @@ def ping_server(ip, port, timeout=0.3):
         # General error (firewall, routing issue, etc.)
         return -1
 
+
 def scrape_jkhub_servers(url):
     """
-    Scrapes JKHub server list with CORRECT column mapping based on actual table structure:
-    Index 0: (empty)
-    Index 1: Server Name  
-    Index 2: (empty)
-    Index 3: Address (IP:Port)
-    Index 4: Map
-    Index 5: Players  
-    Index 6: Bots
-    Index 7: Mod
-    Index 8: Gametype
-    Index 9: Game 
-    Index 10: Master Server(s)
+    Enhanced JKHub server scraper with comprehensive password detection.
+    This version tries multiple methods to detect password-protected servers.
     """
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+
     try:
-        response = requests.get(url, timeout=30)
+        response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         print(f"Error fetching page for scraping: {e}")
@@ -193,43 +196,112 @@ def scrape_jkhub_servers(url):
 
     servers = []
     
-    for row in server_table.find('tbody').find_all('tr'):
+    print("\n=== COMPREHENSIVE PASSWORD DETECTION DEBUG ===")
+    
+    # First, let's check if there are any password-related images anywhere on the page
+    all_images = soup.find_all('img')
+    password_images = [img for img in all_images if 
+                      (img.get('src') and 'password' in img.get('src').lower()) or
+                      (img.get('title') and 'password' in img.get('title').lower()) or
+                      (img.get('alt') and 'password' in img.get('alt').lower())]
+    
+    print(f"Found {len(password_images)} password-related images on the entire page:")
+    for img in password_images:
+        print(f"  - src: {img.get('src')}, title: {img.get('title')}, alt: {img.get('alt')}")
+    
+    # Check the raw HTML for any password.png references
+    raw_html = response.text
+    if 'password.png' in raw_html:
+        print("✓ Found 'password.png' in raw HTML")
+        # Count occurrences
+        count = raw_html.count('password.png')
+        print(f"  - Appears {count} times in the HTML")
+    else:
+        print("✗ No 'password.png' found in raw HTML")
+    
+    if 'password' in raw_html.lower():
+        print("✓ Found 'password' text somewhere in HTML")
+    
+    print("============================================\n")
+    
+    for row_idx, row in enumerate(server_table.find('tbody').find_all('tr')):
         cells = row.find_all('td')
-        if len(cells) < 11:  # Need all 11 columns
+        if len(cells) < 11:
             continue
 
-        # CORRECT mapping based on your debug output:
-        server_data = {
-            'hostname': cells[1].text.strip(),     # Index 1: Server Name
-            'addr': cells[3].text.strip(),         # Index 3: Address  
-            'mapname': cells[4].text.strip(),      # Index 4: Map
-            'clients': cells[5].text.strip(),      # Index 5: Players
-            'mod': cells[7].text.strip(),          # Index 7: Mod (this is what we filter on!)
-            'gametype': cells[8].text.strip(),     # Index 8: Gametype
-            'ping': 'Pinging...'  # Ping data not available in this table, set to N/A
-        }
-
-        servers.append(server_data)
+        # Multiple password detection methods
+        is_passworded = False
+        detection_method = "None"
         
-    print(f"Scraper found {len(servers)} servers")
+        # Method 1: Look for images with password in src, title, or alt
+        for cell_idx, cell in enumerate(cells):
+            for img in cell.find_all('img'):
+                src = img.get('src', '')
+                title = img.get('title', '')
+                alt = img.get('alt', '')
+                
+                if ('password' in src.lower() or 
+                    'password' in title.lower() or 
+                    'password' in alt.lower()):
+                    is_passworded = True
+                    detection_method = f"Image in cell {cell_idx} (src:{src}, title:{title})"
+                    break
+            if is_passworded:
+                break
+        
+        # Method 2: Check for specific lock/key symbols or text
+        if not is_passworded:
+            row_html = str(row)
+            row_text = row.get_text()
+            lock_indicators = ['🔒', '🔐', '🗝️', 'locked', 'private', 'protected']
+            
+            for indicator in lock_indicators:
+                if indicator in row_html or indicator in row_text.lower():
+                    is_passworded = True
+                    detection_method = f"Lock indicator: {indicator}"
+                    break
+        
+        # Method 3: Check for CSS classes that might indicate password protection
+        if not is_passworded:
+            for cell in cells:
+                if cell.get('class'):
+                    classes = ' '.join(cell.get('class'))
+                    if any(word in classes.lower() for word in ['password', 'locked', 'private', 'protected']):
+                        is_passworded = True
+                        detection_method = f"CSS class: {classes}"
+                        break
+
+        # Extract server data
+        try:
+            server_data = {
+                'hostname': cells[1].text.strip(),
+                'addr': cells[3].text.strip(),
+                'mapname': cells[4].text.strip(),
+                'clients': cells[5].text.strip(),
+                'mod': cells[7].text.strip(),
+                'gametype': cells[8].text.strip(),
+                'ping': 'Pinging...',
+                'passworded': is_passworded
+            }
+            
+            # Debug output for passworded servers
+            if is_passworded:
+                print(f"🔒 PASSWORDED SERVER FOUND:")
+                print(f"   Server: {server_data['hostname']}")
+                print(f"   Address: {server_data['addr']}")
+                print(f"   Detection method: {detection_method}")
+                print(f"   Row HTML snippet: {str(row)[:200]}...\n")
+            
+            servers.append(server_data)
+            
+        except IndexError as e:
+            print(f"Error parsing row {row_idx}: {e}")
+            continue
     
-    # Show first 3 servers to verify the mapping
-    print("\n=== FIRST 3 SERVERS WITH CORRECT MAPPING ===")
-    for i, server in enumerate(servers[:3]):
-        print(f"Server {i+1}:")
-        print(f"  hostname: '{server.get('hostname')}'")
-        print(f"  addr: '{server.get('addr')}'")
-        print(f"  mapname: '{server.get('mapname')}'")
-        print(f"  clients: '{server.get('clients')}'")
-        print(f"  mod: '{server.get('mod')}'")
-        print(f"  gametype: '{server.get('gametype')}'")
-        print(f"  ping: '{server.get('ping')}'")
-        print()
-    print("=======================================\n")
+    passworded_count = sum(1 for server in servers if server['passworded'])
+    print(f"Scraper found {len(servers)} servers total, {passworded_count} password-protected")
     
     return servers
-
-
 
 class GitHubReleaseManager:
     """
@@ -1190,7 +1262,13 @@ class ServerBrowser:
         self.servers = []
         self.filter_popup = None
         self.mod_filter = 'Movie Battles II'  # Start with All Mods to see everything first
-        
+
+        # Default sorting state
+        self.sort_col = 'Players'
+        self.sort_dir = True
+
+        self.selected_server_addr = None
+
         # UI Setup
         self.window = tk.Toplevel(self.master)
         self.window.title("MBII Server Browser")
@@ -1203,6 +1281,18 @@ class ServerBrowser:
         self.create_widgets()
         self.fetch_servers()
         self.setup_sorting()
+
+    def on_server_select(self, event):
+        """Updates the selected_server_addr when a row is clicked."""
+        selected_item = self.server_tree.focus()
+        if selected_item:
+            # The 'Address' column is at index 1 in the values tuple
+            addr = self.server_tree.item(selected_item, 'values')[1]
+            self.selected_server_addr = addr
+            self.status_label.config(text=f"Selected Server: {addr}", fg=self.highlight_color)
+        else:
+            self.selected_server_addr = None
+            self.status_label.config(text="Ready.", fg=self.text_color)
 
     def _sanitize_string(self, text):
         """Removes non-alphanumeric characters and converts to lowercase."""
@@ -1238,6 +1328,16 @@ class ServerBrowser:
             self.server_tree.move(k, '', index)
 
         self.server_tree.heading(col, command=lambda: self.sort_column(col, not reverse))
+        arrow = ' ▼' if reverse else ' ▲' # ▼ = Descending (Highest First), ▲ = Ascending (Lowest First)
+        for c in self.server_tree["columns"]:
+            current_text = self.server_tree.heading(c, option="text")
+            # Remove any existing arrows
+            clean_text = current_text.replace(' ▲', '').replace(' ▼', '')
+            self.server_tree.heading(c, text=clean_text)
+
+        # Add the new arrow to the currently sorted column
+        current_text = self.server_tree.heading(col, option="text")
+        self.server_tree.heading(col, text=current_text + arrow)
 
     def setup_sorting(self):
         """Binds the sorting function to the relevant column headers."""
@@ -1283,7 +1383,7 @@ class ServerBrowser:
         list_frame.grid_rowconfigure(0, weight=1)
         
         # Define the columns
-        all_columns = ('Name', 'Address', 'Map', 'Players', 'Mod', 'GameType', 'Ping')
+        all_columns = ('Name', 'Address', 'Map', 'Players', 'Password', 'Mod', 'GameType', 'Ping')
         
         # Scrollbars
         list_vscrollbar = tk.Scrollbar(list_frame, orient=tk.VERTICAL, 
@@ -1309,25 +1409,28 @@ class ServerBrowser:
         self.server_tree.grid(row=0, column=0, sticky="nsew") 
 
         # Define column properties with better widths
-        self.server_tree.heading('Name', text='Server Name ↕', anchor=tk.W)
+        self.server_tree.heading('Name', text='Server Name', anchor=tk.W)
         self.server_tree.column('Name', width=250, stretch=tk.NO, anchor=tk.W) 
         
-        self.server_tree.heading('Address', text='IP:Port ↕', anchor=tk.W)
+        self.server_tree.heading('Address', text='IP:Port', anchor=tk.W)
         self.server_tree.column('Address', width=130, stretch=tk.NO, anchor=tk.W) 
         
-        self.server_tree.heading('Map', text='Map ↕', anchor=tk.W)
+        self.server_tree.heading('Map', text='Map', anchor=tk.W)
         self.server_tree.column('Map', width=120, stretch=tk.NO, anchor=tk.W)
         
-        self.server_tree.heading('Players', text='Players ↕', anchor=tk.CENTER)
+        self.server_tree.heading('Players', text='Players', anchor=tk.CENTER)
         self.server_tree.column('Players', width=70, stretch=tk.NO, anchor=tk.CENTER)
 
-        self.server_tree.heading('Mod', text='Mod ↕', anchor=tk.W)
+        self.server_tree.heading('Password', text='Lock', anchor=tk.CENTER)
+        self.server_tree.column('Password', width=40, stretch=tk.NO, anchor=tk.CENTER)
+
+        self.server_tree.heading('Mod', text='Mod', anchor=tk.W)
         self.server_tree.column('Mod', width=120, stretch=tk.NO, anchor=tk.W)
 
-        self.server_tree.heading('GameType', text='Game Type ↕', anchor=tk.W)
+        self.server_tree.heading('GameType', text='Game Type', anchor=tk.W)
         self.server_tree.column('GameType', width=100, stretch=tk.NO, anchor=tk.W)
 
-        self.server_tree.heading('Ping', text='Ping ↕', anchor=tk.CENTER)
+        self.server_tree.heading('Ping', text='Ping', anchor=tk.CENTER)
         self.server_tree.column('Ping', width=50, stretch=tk.NO, anchor=tk.CENTER)
 
         # Status and Control Frame
@@ -1341,6 +1444,16 @@ class ServerBrowser:
         button_frame = tk.Frame(control_frame, bg=self.dark_background_color)
         button_frame.grid(row=0, column=1, sticky="e")
 
+        self.join_button = tk.Button(button_frame, text="[?]", command=self.show_mbii_warning, 
+                                     bg=self.highlight_color, fg=self.text_color, 
+                                     activebackground=self.border_color, relief="raised")
+        self.join_button.pack(side=tk.LEFT, padx=5)
+
+        self.join_button = tk.Button(button_frame, text="Join Server", command=self.join_selected_server, 
+                                     bg=self.highlight_color, fg=self.text_color, 
+                                     activebackground=self.border_color, relief="raised", font=('Helvetica', 9, 'bold'))
+        self.join_button.pack(side=tk.LEFT, padx=5)
+
         self.filter_button = tk.Button(button_frame, text="Filter", command=self.open_filter_popup, 
                                       bg=self.border_color, fg=self.text_color, 
                                       activebackground=self.highlight_color, relief="raised")
@@ -1350,6 +1463,188 @@ class ServerBrowser:
                                        bg=self.border_color, fg=self.text_color, 
                                        activebackground=self.highlight_color, relief="raised")
         self.refresh_button.pack(side=tk.LEFT, padx=5)
+
+        self.server_tree.bind('<<TreeviewSelect>>', self.on_server_select)
+        # Handle double clicking
+        self.server_tree.bind('<Double-1>', lambda event: self.join_selected_server()) 
+
+    def show_mbii_warning(self):
+        """
+        Displays a message box with a warning about server anti-cheat settings
+        for a specific platform.
+        """
+        root = tk.Tk()
+        root.withdraw()  # Hides the main tkinter window
+
+        message_title = "MBII Platform Warning"
+        message_text = (
+            "Ensure the servers you are joining uses g_AntiCheat 0 in order to "
+            "use this platform without official MBII launcher errors."
+       )
+
+        self.show_custom_messagebox(message_title, message_text)
+
+    def join_selected_server(self):
+        """Finds the game executable and launches the game connected to the selected server."""
+        if not self.selected_server_addr:
+            self.show_custom_messagebox("Error", "Please select a server to join.")
+            return
+
+        cache_dir = os.path.join(os.path.dirname(sys.argv[0]), "cache")
+        config_path = os.path.join(cache_dir, "mbiidirectory.json")
+        
+        config_data = read_json_file(config_path)
+
+        if not config_data or 'path' not in config_data:
+            self.show_custom_messagebox("Error", "MBII game directory not found. Please set the directory in the updater first.")
+            return
+
+        mbii_dir = config_data['path']
+        # Go back one directory from MBII to GameData
+        gamedata_dir = os.path.dirname(mbii_dir)
+        
+        # Determine the executable based on the operating system
+        if sys.platform.startswith('win'):
+            # Windows: mbii.x86.exe is in the Gamedata folder
+            executable = os.path.join(gamedata_dir, "mbii.x86.exe")
+        else:
+            # Unix/Linux/Non-Windows: mbii.i386 is generally used
+            executable = os.path.join(gamedata_dir, "mbii.i386")
+        
+        if not os.path.exists(executable):
+            self.show_custom_messagebox("Error", f"Game executable not found at: {executable}")
+            return
+
+        # Check if the selected server is password-protected
+        selected_server = None
+        for server in self.servers:
+            if server.get('addr') == self.selected_server_addr:
+                selected_server = server
+                break
+        
+        password = None
+        if selected_server and selected_server.get('passworded', False):
+            # Server is password-protected, prompt for password
+            password = self.ask_for_password(selected_server.get('hostname', 'Unknown Server'))
+            if password is None:  # User canceled the password dialog
+                return
+
+        # Build the command and arguments
+        # The '+set fs_game "MBII"' is required to ensure it loads the correct mod
+        command = [
+            executable,
+            '+set', 'fs_game', 'MBII',
+            '+connect', self.selected_server_addr
+        ]
+        
+        # Add password if provided
+        if password:
+            command.extend(['+password', password])
+
+        try:
+            # Execute the game in a new process
+            import subprocess
+            subprocess.Popen(command, cwd=gamedata_dir)
+            if password:
+                self.show_custom_messagebox("Success", f"Launching game and attempting to connect to {self.selected_server_addr} with password")
+            else:
+                self.show_custom_messagebox("Success", f"Launching game and attempting to connect to {self.selected_server_addr}")
+            self.window.destroy() # Close the server browser window
+        except Exception as e:
+            self.show_custom_messagebox("Launch Error", f"Failed to launch game: {e}")
+
+    def ask_for_password(self, server_name):
+        """Creates a custom password input dialog and returns the entered password or None if canceled."""
+        password_result = None
+        
+        popup = tk.Toplevel(self.window)
+        popup.title("Server Password Required")
+        popup.configure(bg=self.dark_background_color)
+        popup.resizable(False, False)
+        popup.grab_set()
+        
+        if self.icon_path_ico:
+            popup.iconbitmap(self.icon_path_ico)
+            
+        # Center the popup
+        popup.geometry("400x200")
+        x = self.window.winfo_x() + self.window.winfo_width() // 2 - 200
+        y = self.window.winfo_y() + self.window.winfo_height() // 2 - 100
+        popup.geometry(f'+{x}+{y}')
+
+        # Main frame
+        main_frame = tk.Frame(popup, bg=self.dark_background_color, padx=20, pady=20)
+        main_frame.pack(expand=True, fill="both")
+        
+        # Lock icon
+        lock_label = tk.Label(main_frame, text="🔒", font=("Helvetica", 24), 
+                             bg=self.dark_background_color, fg="orange")
+        lock_label.pack(pady=(0, 10))
+        
+        # Server name label
+        server_label = tk.Label(main_frame, text=f"Server: {server_name}", 
+                               font=("Helvetica", 10, "bold"), 
+                               bg=self.dark_background_color, fg=self.text_color,
+                               wraplength=360)
+        server_label.pack(pady=(0, 5))
+        
+        # Info label
+        info_label = tk.Label(main_frame, text="This server requires a password to join:", 
+                             font=("Helvetica", 9), 
+                             bg=self.dark_background_color, fg=self.text_color)
+        info_label.pack(pady=(0, 10))
+        
+        # Password entry frame
+        entry_frame = tk.Frame(main_frame, bg=self.dark_background_color)
+        entry_frame.pack(fill="x", pady=(0, 15))
+        
+        password_label = tk.Label(entry_frame, text="Password:", font=("Helvetica", 9), 
+                                 bg=self.dark_background_color, fg=self.text_color)
+        password_label.pack(side=tk.LEFT)
+        
+        password_entry = tk.Entry(entry_frame, show="*", font=("Helvetica", 10), 
+                                 bg="#f0f0f0", fg="black", width=25)
+        password_entry.pack(side=tk.LEFT, padx=(10, 0), fill="x", expand=True)
+        password_entry.focus_set()  # Focus on the password entry
+        
+        # Button frame
+        button_frame = tk.Frame(main_frame, bg=self.dark_background_color)
+        button_frame.pack()
+        
+        def on_connect():
+            nonlocal password_result
+            password_result = password_entry.get().strip()
+            popup.destroy()
+        
+        def on_cancel():
+            nonlocal password_result
+            password_result = None
+            popup.destroy()
+        
+        # Connect button
+        connect_button = tk.Button(button_frame, text="Connect", command=on_connect,
+                                  bg="#4CAF50", fg="white", 
+                                  activebackground="#45a049", relief="raised", 
+                                  font=("Helvetica", 9, "bold"), width=10)
+        connect_button.pack(side=tk.LEFT, padx=(0, 5))
+        connect_button.bind("<Enter>", lambda e: e.widget.configure(bg="#45a049"))
+        connect_button.bind("<Leave>", lambda e: e.widget.configure(bg="#4CAF50"))
+        
+        # Cancel button
+        cancel_button = tk.Button(button_frame, text="Cancel", command=on_cancel,
+                                 bg="#e74c3c", fg="white", 
+                                 activebackground="#c0392b", relief="raised", 
+                                 font=("Helvetica", 9, "bold"), width=10)
+        cancel_button.pack(side=tk.LEFT, padx=(5, 0))
+        cancel_button.bind("<Enter>", lambda e: e.widget.configure(bg="#c0392b"))
+        cancel_button.bind("<Leave>", lambda e: e.widget.configure(bg="#e74c3c"))
+        
+        # Allow Enter key to connect and Escape to cancel
+        password_entry.bind('<Return>', lambda e: on_connect())
+        popup.bind('<Escape>', lambda e: on_cancel())
+        
+        popup.wait_window()
+        return password_result
 
     def fetch_servers(self):
         self.status_label.config(text=f"Fetching servers...", fg="#3498db")
@@ -1452,6 +1747,7 @@ class ServerBrowser:
             except tk.TclError:
                 pass
 
+
     def display_servers(self):
         """Display servers with improved filtering"""
         # Clear existing entries
@@ -1488,15 +1784,23 @@ class ServerBrowser:
             addr = server.get('addr', 'N/A')
             mapname = server.get('mapname', 'N/A')
             clients = str(server.get('clients', 'N/A'))
+
+            # FIXED: Use 'passworded' instead of 'password'
+            is_passworded = server.get('passworded', False)
+            password_status = "🔒" if is_passworded else ""
+
             mod = server.get('mod', 'N/A')
             gametype = server.get('gametype', 'N/A')
             ping = str(server.get('ping', 'N/A'))
             
             self.server_tree.insert('', 'end', iid=f"server_{i}", 
-                                   values=(hostname, addr, mapname, clients, mod, gametype, ping))
+                                   values=(hostname, addr, mapname, clients, password_status, mod, gametype, ping))
 
         status_text = f"Loaded {len(self.servers)} servers. Displaying {len(filtered_servers)} for '{self.mod_filter}'"
         self.status_label.config(text=status_text, fg=self.text_color)
+
+        if filtered_servers:
+            self.sort_column(self.sort_col, self.sort_dir)
 
     def open_filter_popup(self):
         """Opens filter popup"""
