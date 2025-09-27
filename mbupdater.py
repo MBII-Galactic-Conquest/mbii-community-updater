@@ -314,6 +314,7 @@ class GitHubReleaseManager:
 
     # NEW: Hardcoded URL for the main repository list file
     HARDCODED_REPOSITORIES_REPO_URL = "https://raw.githubusercontent.com/MBII-Galactic-Conquest/mbii-community-updater/main/repositories.json"
+    HARDCODED_SERVERS_URL = "https://raw.githubusercontent.com/MBII-Galactic-Conquest/mbii-community-updater/main/servers.json"
 
     def __init__(self, master):
         """
@@ -356,6 +357,7 @@ class GitHubReleaseManager:
         # --- File Paths are now relative to a 'cache' directory ---
         self.create_cache_directory()
         self.repositories_file = os.path.join("cache", "repositories.json")
+        self.servers_file = os.path.join("cache", "servers.json")
         self.client_file = os.path.join("cache", "client.json")
         self.mbii_directory_file = os.path.join("cache", "mbiidirectory.json")
         # Music file is now expected in the root directory, not the cache
@@ -660,6 +662,24 @@ class GitHubReleaseManager:
                 self.master.after(0, lambda: self.status_label.config(text="No remote or local repository list found. Please check network.", fg="#e74c3c"))
                 self.master.after(0, lambda msg=str(e): self.show_custom_messagebox("Repository List Warning", f"Could not fetch or find repositories.json.\nError: {msg}", icon_type='warning'))
 
+        try:
+            url2 = self.HARDCODED_SERVERS_URL
+            response2 = requests.get(url2)
+            response2.raise_for_status()
+
+            servers_data = response2.json() 
+
+            try:
+                with open(self.servers_file, 'w') as f:
+                    json.dump(servers_data, f, indent=4)
+
+                self.master.after(0, lambda: print("Servers list saved successfully.")) 
+
+            except IOError as e:
+                self.master.after(0, lambda: self.show_custom_messagebox("Servers File Save Error", f"Could not save the new modded servers list: {e}", icon_type='warning'))
+
+        except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
+            self.master.after(0, lambda: print(f"Warning: Failed to fetch modded servers list from URL: {e}"))
             self.master.after(0, self.populate_repositories)
 
     def load_client_data(self):
@@ -1859,6 +1879,354 @@ class ServerBrowser:
         self.mod_filter = self.mod_filter_var.get()
         self.filter_popup.destroy()
         self.display_servers()
+
+    def load_servers_config(self):
+        """Load the servers.json configuration file from cache."""
+        self.servers_config_file = os.path.join(os.path.dirname(sys.argv[0]), "cache", "servers.json")
+        if os.path.exists(self.servers_config_file):
+            try:
+                with open(self.servers_config_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"Error reading servers config: {e}")
+                return {}
+        return {}
+
+    def load_repositories_config(self):
+        """Load the repositories.json configuration from cache."""
+        self.repos_config_file = os.path.join(os.path.dirname(sys.argv[0]), "cache", "repositories.json")
+        if os.path.exists(self.repos_config_file):
+            try:
+                with open(self.repos_config_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"Error reading repositories config: {e}")
+                return []
+        return []
+
+    def load_client_data(self):
+        """Load client.json to check download status."""
+        self.client_config_file = os.path.join(os.path.dirname(sys.argv[0]), "cache", "client.json")
+        if os.path.exists(self.client_config_file):
+            try:
+                with open(self.client_config_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"Error reading client config: {e}")
+                return {}
+        return {}
+
+    def check_server_content_status(self, server_name):
+        """
+        Check the content status of a server based on its name.
+        Returns: 'green' (up-to-date), 'red' (outdated), 'not_downloaded', or 'not_found'
+        """
+        # Load configuration files
+        servers_config = self.load_servers_config()
+        repositories_config = self.load_repositories_config()
+        client_data = self.load_client_data()
+        
+        # Check if server is configured in servers.json
+        if server_name not in servers_config:
+            return 'not_found'
+        
+        # Find matching repository by custom_name
+        matching_repo = None
+        for repo in repositories_config:
+            if repo.get('custom_name') == server_name:
+                matching_repo = repo
+                break
+        
+        if not matching_repo:
+            return 'not_found'
+        
+        repo_url = matching_repo.get('url')
+        if not repo_url:
+            return 'not_found'
+        
+        # Check if content is downloaded
+        if repo_url not in client_data:
+            return 'not_downloaded'
+        
+        # Get local version
+        local_tag = client_data[repo_url].get('last_tag')
+        if not local_tag:
+            return 'not_downloaded'
+        
+        # Check remote version
+        try:
+            parts = repo_url.rstrip('/').split('/')
+            owner = parts[-2]
+            repo_name = parts[-1]
+            api_url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/latest"
+            response = requests.get(api_url, timeout=10)
+            response.raise_for_status()
+            latest_data = response.json()
+            latest_tag = latest_data.get('tag_name')
+            
+            if latest_tag == local_tag:
+                return 'green'  # Up-to-date
+            else:
+                return 'red'    # Outdated
+                
+        except Exception as e:
+            print(f"Error checking remote version for {server_name}: {e}")
+            return 'green'  # Assume up-to-date if we can't check
+    
+    def show_content_status_dialog(self, server_name, status):
+        """
+        Show appropriate dialog based on content status.
+        Returns True if user wants to proceed with join, False otherwise.
+        """
+        if status == 'green':
+            # Content is up-to-date, allow joining directly
+            return True
+            
+        elif status == 'red':
+            # Content is outdated, prompt to update
+            return self.ask_outdated_content_dialog(server_name)
+            
+        elif status == 'not_downloaded':
+            # Content not downloaded, prompt to download
+            return self.ask_download_content_dialog(server_name)
+            
+        else:  # 'not_found'
+            # No matching content found, allow joining
+            return True
+    
+    def ask_outdated_content_dialog(self, server_name):
+        """Show dialog for outdated content."""
+        result = None
+        
+        popup = tk.Toplevel(self.window)
+        popup.title("Content Update Available")
+        popup.configure(bg=self.dark_background_color)
+        popup.resizable(False, False)
+        popup.grab_set()
+        
+        if self.icon_path_ico:
+            popup.iconbitmap(self.icon_path_ico)
+        
+        popup.geometry("450x250")
+        x = self.window.winfo_x() + self.window.winfo_width() // 2 - 225
+        y = self.window.winfo_y() + self.window.winfo_height() // 2 - 125
+        popup.geometry(f'+{x}+{y}')
+        
+        main_frame = tk.Frame(popup, bg=self.dark_background_color, padx=20, pady=20)
+        main_frame.pack(expand=True, fill="both")
+        
+        # Warning icon
+        warning_label = tk.Label(main_frame, text="⚠️", font=("Helvetica", 24), 
+                                bg=self.dark_background_color, fg="orange")
+        warning_label.pack(pady=(0, 10))
+        
+        # Title
+        title_label = tk.Label(main_frame, text="Content Update Available", 
+                              font=("Helvetica", 12, "bold"), 
+                              bg=self.dark_background_color, fg=self.text_color)
+        title_label.pack(pady=(0, 10))
+        
+        # Message
+        message = f"The content for '{server_name}' is outdated.\n\nIt's recommended to update before joining to ensure compatibility."
+        message_label = tk.Label(main_frame, text=message, font=("Helvetica", 10), 
+                                bg=self.dark_background_color, fg=self.text_color,
+                                wraplength=400, justify="center")
+        message_label.pack(pady=(0, 20))
+        
+        def on_update():
+            nonlocal result
+            result = 'update'
+            popup.destroy()
+        
+        def on_join_anyway():
+            nonlocal result
+            result = 'join'
+            popup.destroy()
+        
+        def on_cancel():
+            nonlocal result
+            result = 'cancel'
+            popup.destroy()
+        
+        button_frame = tk.Frame(main_frame, bg=self.dark_background_color)
+        button_frame.pack()
+        
+        update_button = tk.Button(button_frame, text="Update Content", command=on_update,
+                                 bg="#4CAF50", fg="white", activebackground="#45a049", 
+                                 relief="raised", font=("Helvetica", 9, "bold"), width=12)
+        update_button.pack(side=tk.LEFT, padx=(0, 5))
+        
+        join_button = tk.Button(button_frame, text="Join Anyway", command=on_join_anyway,
+                               bg="orange", fg="white", activebackground="#FF8C00", 
+                               relief="raised", font=("Helvetica", 9, "bold"), width=12)
+        join_button.pack(side=tk.LEFT, padx=(5, 5))
+        
+        cancel_button = tk.Button(button_frame, text="Cancel", command=on_cancel,
+                                 bg="#e74c3c", fg="white", activebackground="#c0392b", 
+                                 relief="raised", font=("Helvetica", 9, "bold"), width=12)
+        cancel_button.pack(side=tk.LEFT, padx=(5, 0))
+        
+        popup.wait_window()
+        
+        if result == 'update':
+            self.open_content_page()
+            return False
+        elif result == 'join':
+            return True
+        else:  # cancel
+            return False
+    
+    def ask_download_content_dialog(self, server_name):
+        """Show dialog for missing content."""
+        result = None
+        
+        popup = tk.Toplevel(self.window)
+        popup.title("Content Required")
+        popup.configure(bg=self.dark_background_color)
+        popup.resizable(False, False)
+        popup.grab_set()
+        
+        if self.icon_path_ico:
+            popup.iconbitmap(self.icon_path_ico)
+        
+        popup.geometry("450x250")
+        x = self.window.winfo_x() + self.window.winfo_width() // 2 - 225
+        y = self.window.winfo_y() + self.window.winfo_height() // 2 - 125
+        popup.geometry(f'+{x}+{y}')
+        
+        main_frame = tk.Frame(popup, bg=self.dark_background_color, padx=20, pady=20)
+        main_frame.pack(expand=True, fill="both")
+        
+        # Info icon
+        info_label = tk.Label(main_frame, text="📦", font=("Helvetica", 24), 
+                             bg=self.dark_background_color, fg="#3498db")
+        info_label.pack(pady=(0, 10))
+        
+        # Title
+        title_label = tk.Label(main_frame, text="Content Required", 
+                              font=("Helvetica", 12, "bold"), 
+                              bg=self.dark_background_color, fg=self.text_color)
+        title_label.pack(pady=(0, 10))
+        
+        # Message
+        message = f"The server '{server_name}' requires additional content that you haven't downloaded yet.\n\nWould you like to download it now?"
+        message_label = tk.Label(main_frame, text=message, font=("Helvetica", 10), 
+                                bg=self.dark_background_color, fg=self.text_color,
+                                wraplength=400, justify="center")
+        message_label.pack(pady=(0, 20))
+        
+        def on_download():
+            nonlocal result
+            result = 'download'
+            popup.destroy()
+        
+        def on_cancel():
+            nonlocal result
+            result = 'cancel'
+            popup.destroy()
+        
+        button_frame = tk.Frame(main_frame, bg=self.dark_background_color)
+        button_frame.pack()
+        
+        download_button = tk.Button(button_frame, text="Download Content", command=on_download,
+                                   bg="#4CAF50", fg="white", activebackground="#45a049", 
+                                   relief="raised", font=("Helvetica", 9, "bold"), width=15)
+        download_button.pack(side=tk.LEFT, padx=(0, 10))
+        
+        cancel_button = tk.Button(button_frame, text="Cancel", command=on_cancel,
+                                 bg="#e74c3c", fg="white", activebackground="#c0392b", 
+                                 relief="raised", font=("Helvetica", 9, "bold"), width=15)
+        cancel_button.pack(side=tk.LEFT, padx=(10, 0))
+        
+        popup.wait_window()
+        
+        if result == 'download':
+            self.open_content_page()
+            return False
+        else:  # cancel
+            return False
+    
+    def open_content_page(self):
+        """Switch to the content page (close server browser and focus main window)."""
+        self.show_custom_messagebox("Redirected", "Switched to Content tab to manage downloads.")
+        self.window.destroy()  # Close server browser
+        # The main window's Content button could be highlighted or focused here
+
+    def join_selected_server(self):
+        """Enhanced join server method with content checking."""
+        if not self.selected_server_addr:
+            self.show_custom_messagebox("Error", "Please select a server to join.")
+            return
+
+        # Get the selected server data
+        selected_server = None
+        for server in self.servers:
+            if server.get('addr') == self.selected_server_addr:
+                selected_server = server
+                break
+        
+        if not selected_server:
+            self.show_custom_messagebox("Error", "Could not find selected server data.")
+            return
+        
+        server_hostname = selected_server.get('hostname', 'Unknown Server')
+        
+        # Check content status
+        content_status = self.check_server_content_status(server_hostname)
+        
+        # Show appropriate dialog based on status
+        if not self.show_content_status_dialog(server_hostname, content_status):
+            return  # User cancelled or chose to download/update content
+        
+        # Continue with existing join logic
+        cache_dir = os.path.join(os.path.dirname(sys.argv[0]), "cache")
+        config_path = os.path.join(cache_dir, "mbiidirectory.json")
+        
+        config_data = read_json_file(config_path)
+
+        if not config_data or 'path' not in config_data:
+            self.show_custom_messagebox("Error", "MBII game directory not found. Please set the directory in the updater first.")
+            return
+
+        mbii_dir = config_data['path']
+        gamedata_dir = os.path.dirname(mbii_dir)
+        
+        if sys.platform.startswith('win'):
+            executable = os.path.join(gamedata_dir, "mbii.x86.exe")
+        else:
+            executable = os.path.join(gamedata_dir, "mbii.i386")
+        
+        if not os.path.exists(executable):
+            self.show_custom_messagebox("Error", f"Game executable not found at: {executable}")
+            return
+
+        # Check for password protection
+        password = None
+        if selected_server.get('passworded', False):
+            password = self.ask_for_password(server_hostname)
+            if password is None:
+                return
+
+        # Build command
+        command = [
+            executable,
+            '+set', 'fs_game', 'MBII',
+            '+connect', self.selected_server_addr
+        ]
+        
+        if password:
+            command.extend(['+password', password])
+
+        try:
+            import subprocess
+            subprocess.Popen(command, cwd=gamedata_dir)
+            if password:
+                self.show_custom_messagebox("Success", f"Launching game and attempting to connect to {self.selected_server_addr} with password")
+            else:
+                self.show_custom_messagebox("Success", f"Launching game and attempting to connect to {self.selected_server_addr}")
+            self.window.destroy()
+        except Exception as e:
+            self.show_custom_messagebox("Launch Error", f"Failed to launch game: {e}")
 
 if __name__ == '__main__':
     root = tk.Tk()
