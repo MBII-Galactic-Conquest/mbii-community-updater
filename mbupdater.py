@@ -1430,14 +1430,14 @@ class ServerBrowser:
 
         # Define column properties with better widths
         self.server_tree.heading('Name', text='Server Name', anchor=tk.W)
-        self.server_tree.column('Name', width=250, stretch=tk.NO, anchor=tk.W) 
-        
+        self.server_tree.column('Name', width=300, stretch=tk.NO, anchor=tk.W) 
+
         self.server_tree.heading('Address', text='IP:Port', anchor=tk.W)
-        self.server_tree.column('Address', width=130, stretch=tk.NO, anchor=tk.W) 
+        self.server_tree.column('Address', width=150, stretch=tk.NO, anchor=tk.W) 
         
         self.server_tree.heading('Map', text='Map', anchor=tk.W)
         self.server_tree.column('Map', width=120, stretch=tk.NO, anchor=tk.W)
-        
+
         self.server_tree.heading('Players', text='Players', anchor=tk.CENTER)
         self.server_tree.column('Players', width=70, stretch=tk.NO, anchor=tk.CENTER)
 
@@ -1445,13 +1445,13 @@ class ServerBrowser:
         self.server_tree.column('Password', width=40, stretch=tk.NO, anchor=tk.CENTER)
 
         self.server_tree.heading('Mod', text='Mod', anchor=tk.W)
-        self.server_tree.column('Mod', width=120, stretch=tk.NO, anchor=tk.W)
+        self.server_tree.column('Mod', width=150, stretch=tk.NO, anchor=tk.W)
 
         self.server_tree.heading('GameType', text='Game Type', anchor=tk.W)
         self.server_tree.column('GameType', width=100, stretch=tk.NO, anchor=tk.W)
 
         self.server_tree.heading('Ping', text='Ping', anchor=tk.CENTER)
-        self.server_tree.column('Ping', width=50, stretch=tk.NO, anchor=tk.CENTER)
+        self.server_tree.column('Ping', width=250, stretch=tk.NO, anchor=tk.CENTER)
 
         # Status and Control Frame
         control_frame = tk.Frame(self.window, bg=self.dark_background_color)
