@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, filedialog
+import concurrent.futures
 import threading
 import requests
 import json
@@ -7,8 +8,11 @@ import os
 import itertools
 import shutil
 import zipfile
+import socket
+import time
 import io
 import sys
+import re
 
 # ====================================================================
 # REQUIRED MODULES:
@@ -34,11 +38,270 @@ except ImportError:
     tk.messagebox.showerror("Error", "The Pygame library is not installed. Please install it with 'pip install pygame' and restart the application.")
     sys.exit()
 
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    root_error = tk.Tk()
+    root_error.withdraw()
+    tk.messagebox.showerror("Error", "The BeautifulSoup library is not installed. Please install it with 'pip install beautifulsoup4 lxml' and restart the application.")
+    sys.exit()
+
 def get_resource_path(filename):
     """Returns the correct path for PyInstaller-bundled resources."""
     if hasattr(sys, '_MEIPASS'):
         return os.path.join(sys._MEIPASS, filename)
     return os.path.join(os.path.abspath("."), filename)
+
+def read_json_file(file_path):
+    """Safely reads a JSON file."""
+    if not os.path.exists(file_path):
+        return None
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error reading JSON file {file_path}: {e}")
+        return None
+
+def extract_zip_contents(zip_data, target_directory):
+    """
+    Extracts the contents of a ZIP file, stripping the common root directory 
+    (e.g., 'MBII/') to prevent unwanted nested folders (e.g., /Target/MBII/MBII).
+    
+    Args:
+        zip_data (bytes): The content of the zip file as bytes.
+        target_directory (str): The final destination folder.
+    """
+    try:
+        # 1. Open the zip archive from the byte stream
+        with zipfile.ZipFile(io.BytesIO(zip_data), 'r') as zf:
+            
+            name_list = zf.namelist()
+            if not name_list:
+                return # Zip is empty
+
+            # 2. Identify the common root directory
+            # Finds the longest common prefix (e.g., 'MBII/').
+            root_dir = os.path.commonprefix(name_list)
+            
+            # Ensure the root_dir is a single-level directory name ending with a separator
+            # If the path is complicated (e.g., 'mod/MBII/'), we treat it as no root.
+            if not root_dir.endswith('/') or root_dir.count('/') > 1:
+                 # If no clear single root directory, set root_dir to empty
+                root_dir = ''
+
+            # 3. Extract all files, modifying the path
+            for member in name_list:
+                
+                # Calculate the new path by stripping the root directory
+                if root_dir and member.startswith(root_dir):
+                    # Strip the root directory (e.g., 'MBII/file' becomes 'file')
+                    arcname = member[len(root_dir):]
+                else:
+                    arcname = member
+                
+                # Skip empty paths (the root folder itself) or directories
+                if not arcname or arcname.endswith('/'):
+                    continue
+
+                # The full extraction path
+                dest_path = os.path.join(target_directory, arcname)
+                
+                # Ensure the target subdirectory exists
+                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                
+                # Extract the file content
+                with open(dest_path, 'wb') as outfile:
+                    outfile.write(zf.read(member))
+
+        print(f"Extraction successful: files extracted directly to {target_directory}.")
+
+    except Exception as e:
+        # Provide user feedback on the error
+        tk.messagebox.showerror("Extraction Error", f"Failed to extract content: {e}")
+
+# ====================================================================
+# NEW MASTER SERVER DEFINITIONS
+# ====================================================================
+
+MASTER_SERVERS = {
+    "JKHubServers (AppSpot)": "jkhubservers.appspot.com:29070",
+    "MBII (master.moviebattles.org)": "master.moviebattles.org:29070",
+    "MBII (master2.moviebattles.org)": "master2.moviebattles.org:29070",
+    "JKHub (master.jkhub.org)": "master.jkhub.org:29070",
+    "Raven Software (masterjk3.ravensoft.com)": "masterjk3.ravensoft.com:29070",
+    "Custom URL": ""
+}
+
+QUERY_PACKET = b'\xff\xff\xff\xffgetstatus\n'
+
+def ping_server(ip, port, timeout=0.3):
+    """
+    Pings a Quake 3/JKA server using the standard UDP query protocol 
+    to get a more reliable latency measurement.
+    """
+    try:
+        # Use SOCK_DGRAM for UDP
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(timeout)
+        
+        # 1. Send the query packet
+        start_time = time.time()
+        sock.sendto(QUERY_PACKET, (ip, port))
+        
+        # 2. Wait for a response (which includes the ping time implicitly)
+        sock.recv(2048) # Read the response packet
+        
+        end_time = time.time()
+        
+        # Calculate latency in milliseconds and round it
+        latency_ms = round((end_time - start_time) * 1000)
+        
+        sock.close()
+        return latency_ms
+
+    except socket.timeout:
+        # A timeout here means the server didn't respond to the official query
+        return 999
+    except Exception:
+        # General error (firewall, routing issue, etc.)
+        return -1
+
+
+def scrape_jkhub_servers(url):
+    """
+    Enhanced JKHub server scraper with comprehensive password detection.
+    This version tries multiple methods to detect password-protected servers.
+    """
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching page for scraping: {e}")
+        return []
+
+    try:
+        soup = BeautifulSoup(response.text, 'lxml')
+    except Exception:
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+    server_table = soup.find('table')
+    if not server_table or not server_table.find('tbody'):
+        print("Scraper failed: Could not find server table or table body.")
+        return []
+
+    servers = []
+    
+    print("\n=== COMPREHENSIVE PASSWORD DETECTION DEBUG ===")
+    
+    # First, let's check if there are any password-related images anywhere on the page
+    all_images = soup.find_all('img')
+    password_images = [img for img in all_images if 
+                      (img.get('src') and 'password' in img.get('src').lower()) or
+                      (img.get('title') and 'password' in img.get('title').lower()) or
+                      (img.get('alt') and 'password' in img.get('alt').lower())]
+    
+    print(f"Found {len(password_images)} password-related images on the entire page:")
+    for img in password_images:
+        print(f"  - src: {img.get('src')}, title: {img.get('title')}, alt: {img.get('alt')}")
+    
+    # Check the raw HTML for any password.png references
+    raw_html = response.text
+    if 'password.png' in raw_html:
+        print("✓ Found 'password.png' in raw HTML")
+        # Count occurrences
+        count = raw_html.count('password.png')
+        print(f"  - Appears {count} times in the HTML")
+    else:
+        print("✗ No 'password.png' found in raw HTML")
+    
+    if 'password' in raw_html.lower():
+        print("✓ Found 'password' text somewhere in HTML")
+    
+    print("============================================\n")
+    
+    for row_idx, row in enumerate(server_table.find('tbody').find_all('tr')):
+        cells = row.find_all('td')
+        if len(cells) < 11:
+            continue
+
+        # Multiple password detection methods
+        is_passworded = False
+        detection_method = "None"
+        
+        # Method 1: Look for images with password in src, title, or alt
+        for cell_idx, cell in enumerate(cells):
+            for img in cell.find_all('img'):
+                src = img.get('src', '')
+                title = img.get('title', '')
+                alt = img.get('alt', '')
+                
+                if ('password' in src.lower() or 
+                    'password' in title.lower() or 
+                    'password' in alt.lower()):
+                    is_passworded = True
+                    detection_method = f"Image in cell {cell_idx} (src:{src}, title:{title})"
+                    break
+            if is_passworded:
+                break
+        
+        # Method 2: Check for specific lock/key symbols or text
+        if not is_passworded:
+            row_html = str(row)
+            row_text = row.get_text()
+            lock_indicators = ['🔒', '🔐', '🗝️', 'locked', 'private', 'protected']
+            
+            for indicator in lock_indicators:
+                if indicator in row_html or indicator in row_text.lower():
+                    is_passworded = True
+                    detection_method = f"Lock indicator: {indicator}"
+                    break
+        
+        # Method 3: Check for CSS classes that might indicate password protection
+        if not is_passworded:
+            for cell in cells:
+                if cell.get('class'):
+                    classes = ' '.join(cell.get('class'))
+                    if any(word in classes.lower() for word in ['password', 'locked', 'private', 'protected']):
+                        is_passworded = True
+                        detection_method = f"CSS class: {classes}"
+                        break
+
+        # Extract server data
+        try:
+            server_data = {
+                'hostname': cells[1].text.strip(),
+                'addr': cells[3].text.strip(),
+                'mapname': cells[4].text.strip(),
+                'clients': cells[5].text.strip(),
+                'mod': cells[7].text.strip(),
+                'gametype': cells[8].text.strip(),
+                'ping': 'Pinging...',
+                'passworded': is_passworded
+            }
+            
+            # Debug output for passworded servers
+            if is_passworded:
+                print(f"🔒 PASSWORDED SERVER FOUND:")
+                print(f"   Server: {server_data['hostname']}")
+                print(f"   Address: {server_data['addr']}")
+                print(f"   Detection method: {detection_method}")
+                print(f"   Row HTML snippet: {str(row)[:200]}...\n")
+            
+            servers.append(server_data)
+            
+        except IndexError as e:
+            print(f"Error parsing row {row_idx}: {e}")
+            continue
+    
+    passworded_count = sum(1 for server in servers if server['passworded'])
+    print(f"Scraper found {len(servers)} servers total, {passworded_count} password-protected")
+    
+    return servers
 
 class GitHubReleaseManager:
     """
@@ -51,6 +314,7 @@ class GitHubReleaseManager:
 
     # NEW: Hardcoded URL for the main repository list file
     HARDCODED_REPOSITORIES_REPO_URL = "https://raw.githubusercontent.com/MBII-Galactic-Conquest/mbii-community-updater/main/repositories.json"
+    HARDCODED_SERVERS_URL = "https://raw.githubusercontent.com/MBII-Galactic-Conquest/mbii-community-updater/main/servers.json"
 
     def __init__(self, master):
         """
@@ -68,6 +332,7 @@ class GitHubReleaseManager:
         
         # --- Application State Variables ---
         self.repositories = []
+        self.servers_config = {}
         self.client_data = {}
         self.current_repo_data = {}
         self.available_releases = {}
@@ -93,6 +358,7 @@ class GitHubReleaseManager:
         # --- File Paths are now relative to a 'cache' directory ---
         self.create_cache_directory()
         self.repositories_file = os.path.join("cache", "repositories.json")
+        self.servers_file = os.path.join("cache", "servers.json")
         self.client_file = os.path.join("cache", "client.json")
         self.mbii_directory_file = os.path.join("cache", "mbiidirectory.json")
         # Music file is now expected in the root directory, not the cache
@@ -123,9 +389,98 @@ class GitHubReleaseManager:
         self.load_mbii_directory()
         self.load_client_data()
         self.load_sound_settings()
+        self.load_servers_config()
         
         # Bind the close event to a handler
         self.master.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def get_matching_repository(self, server_hostname):
+        """
+        Finds a matching repository by checking if the server hostname contains 
+        the content's custom_name (case-insensitive).
+
+        Args:
+            server_hostname (str): The name of the server the user is trying to join.
+
+        Returns:
+            dict or None: The matching repository dictionary from self.repositories.
+        """
+        normalized_hostname = server_hostname.lower()
+
+        # 1. Check for a strict, hardcoded hostname match (optional, but good for overrides)
+        # The 'servers.json' file maps strict hostname -> custom_name.
+        if normalized_hostname in self.servers_config:
+            content_name = self.servers_config[normalized_hostname]
+            print(f"Server matched via strict servers.json lookup: {content_name}")
+            return next((repo for repo in self.repositories if repo.get('custom_name').lower() == content_name.lower()), None)
+
+        # 2. Perform the flexible, substring-based search (The user's requested logic)
+        # We iterate through all known content and check if its name is *in* the server's name.
+        for repo in self.repositories:
+            custom_name = repo.get('custom_name')
+
+            # Skip content without a custom name or if it's too short to be meaningful
+            if not custom_name or len(custom_name) < 3:
+                continue
+
+            normalized_custom_name = custom_name.lower()
+
+            # Flexible Match: Check if server name contains the content's custom_name
+            if normalized_custom_name in normalized_hostname:
+                print(f"Server matched via flexible custom_name lookup: {custom_name}")
+                return repo
+
+        return None # No associated content found (joins directly, as per requirement)
+
+    def get_content_status(self, repo):
+        """
+        Compares local content version with the latest remote version.
+
+        Args:
+            repo (dict): The repository data from self.repositories.
+
+        Returns:
+            tuple: (status_string, latest_tag_name)
+        """
+        repo_url = repo.get('url')
+        local_tag = self.client_data.get(repo_url, {}).get('last_tag')
+
+        if not local_tag:
+            return 'not_downloaded', None
+
+        try:
+            parts = repo_url.rstrip('/').split('/')
+            owner = parts[-2]
+            repo_name = parts[-1]
+            api_url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/latest"
+
+            # Use a short timeout for responsiveness
+            response = requests.get(api_url, timeout=5)
+            response.raise_for_status()
+            latest_tag = response.json().get('tag_name')
+
+            if not latest_tag:
+                return 'up-to-date', local_tag # Cannot determine remote, assume safe
+
+            if local_tag == latest_tag:
+                return 'up-to-date', latest_tag
+            else:
+                return 'outdated', latest_tag
+
+        except requests.exceptions.RequestException as e:
+            print(f"Warning: Failed to get latest release for {repo_url}. Assuming up-to-date. Error: {e}")
+            # On failure, assume up-to-date to allow joining the server.
+            return 'up-to-date', local_tag
+
+    def load_servers_config(self):
+        """
+        Loads the server content mapping from cache/servers.json.
+        Uses the read_json_file utility defined globally.
+        """
+        loaded_config = read_json_file(self.servers_file)
+        
+        # Store the loaded configuration, or an empty dict if the file wasn't found/read.
+        self.servers_config = loaded_config or {}
 
     def create_cache_directory(self):
         """Creates a 'cache' directory in the application's root if it doesn't exist."""
@@ -255,7 +610,27 @@ class GitHubReleaseManager:
         })
         style.theme_use("CustomDark")
 
+        # --- NEW: Top Button Row for App Sections ---
+        top_button_frame = tk.Frame(content_frame, bg=self.dark_background_color)
+        # Use column 0, span 2 columns, at the very top (row 0)
+        top_button_frame.grid(row=0, column=0, columnspan=2, pady=(10, 5), sticky="ew")
+
+        def no_action(button_name):
+            """A function that executes, but performs no operation."""
+            pass
+
+        # Content Button
+        self.content_button = tk.Button(top_button_frame, text="Content", command=lambda: no_action("Content"), bg=self.border_color, fg=self.text_color, activebackground=self.highlight_color, relief="raised", font=("Helvetica", 9, "bold"))
+        self.content_button.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+        # Server Browser Button (UPDATED to call the new method)
+        self.server_browser_button = tk.Button(top_button_frame, text="Server Browser", command=self.open_server_browser, bg=self.border_color, fg=self.text_color, activebackground=self.highlight_color, relief="raised", font=("Helvetica", 9, "bold"))
+        self.server_browser_button.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        # --- END NEW BUTTONS ---
+
+
         # Saved Repositories Listbox Section
+        # NOTE: All subsequent row indices must be incremented by 1 due to the new row 0.
         list_frame = tk.LabelFrame(content_frame, text="Community Content", padx=5, pady=5, bg=self.dark_background_color, fg=self.text_color, borderwidth=1, relief="flat")
         list_frame.grid(row=1, column=0, columnspan=2, pady=5, sticky="ew")
         list_frame.grid_columnconfigure(0, weight=1)
@@ -377,6 +752,24 @@ class GitHubReleaseManager:
                 self.master.after(0, lambda: self.status_label.config(text="No remote or local repository list found. Please check network.", fg="#e74c3c"))
                 self.master.after(0, lambda msg=str(e): self.show_custom_messagebox("Repository List Warning", f"Could not fetch or find repositories.json.\nError: {msg}", icon_type='warning'))
 
+        try:
+            url2 = self.HARDCODED_SERVERS_URL
+            response2 = requests.get(url2)
+            response2.raise_for_status()
+
+            servers_data = response2.json() 
+
+            try:
+                with open(self.servers_file, 'w') as f:
+                    json.dump(servers_data, f, indent=4)
+
+                self.master.after(0, lambda: print("Servers list saved successfully.")) 
+
+            except IOError as e:
+                self.master.after(0, lambda: self.show_custom_messagebox("Servers File Save Error", f"Could not save the new modded servers list: {e}", icon_type='warning'))
+
+        except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
+            self.master.after(0, lambda: print(f"Warning: Failed to fetch modded servers list from URL: {e}"))
             self.master.after(0, self.populate_repositories)
 
     def load_client_data(self):
@@ -532,8 +925,6 @@ class GitHubReleaseManager:
                 self.listbox_repos.itemconfig(i, {'fg': color})
 
         self.reset_ui()
-
-
 
     def select_download_path(self):
         """Opens a file dialog for the user to select a download directory and validates it."""
@@ -936,8 +1327,1010 @@ class GitHubReleaseManager:
         if self.loading_window and self.loading_window.winfo_exists():
             self.loading_label.config(text=f' {next(self.spinner)} ')
             self.loading_animation = self.master.after(100, self.update_spinner)
-    
-if __name__ == "__main__":
+
+    def open_server_browser(self):
+        """Opens the Server Browser window, passing self as the parent app."""
+        self.load_servers_config()
+        ServerBrowser(
+            parent_app=self,
+            master=self.master,
+            custom_messagebox_func=self.show_custom_messagebox,
+            icon_path_ico=self.icon_path_ico,
+            dark_bg=self.dark_background_color,
+            text_color=self.text_color,
+            widget_color=self.dark_widget_color,
+            highlight_color=self.highlight_color,
+            border_color=self.border_color
+        )
+
+# ====================================================================
+# NEW: ServerBrowser Class (Implements the server list logic)
+# ====================================================================
+
+class ServerBrowser:
+    def __init__(self, parent_app, master, custom_messagebox_func, icon_path_ico, dark_bg, text_color, widget_color, highlight_color, border_color):
+
+        self.mod_name_map = {
+            'Movie Battles II': [
+                'movie battles',
+                'moviebattles',
+                'Movie Battles',
+                'mb2',  # Adding shorter variants
+                'mbii'
+            ],
+            'basejk': ['basejk', 'basejka', 'base'],
+            'OpenJK': ['openjk', 'ojk'],
+            'All Mods': ['']
+        }
+
+        self.parent_app = parent_app
+        self.window = master
+        self.master = master
+        self.show_custom_messagebox = custom_messagebox_func
+        self.icon_path_ico = icon_path_ico
+
+        self.servers_config = parent_app.servers_config
+
+        # Style variables
+        self.dark_background_color = dark_bg
+        self.text_color = text_color
+        self.dark_widget_color = widget_color
+        self.highlight_color = highlight_color
+        self.border_color = border_color
+        
+        # State variables
+        self.current_master_url = MASTER_SERVERS["JKHubServers (AppSpot)"]
+        self.servers = []
+        self.filter_popup = None
+        self.mod_filter = 'Movie Battles II'  # Start with All Mods to see everything first
+
+        # Default sorting state
+        self.sort_col = 'Players'
+        self.sort_dir = True
+
+        self.selected_server_addr = None
+
+        # UI Setup
+        self.window = tk.Toplevel(self.master)
+        self.window.title("MBII Server Browser")
+        self.window.geometry("1200x600")  # Made even wider
+        self.window.configure(bg=self.dark_background_color)
+        
+        if self.icon_path_ico:
+            self.window.iconbitmap(self.icon_path_ico)
+            
+        self.create_widgets()
+        self.fetch_servers()
+        self.setup_sorting()
+
+    def on_server_select(self, event):
+        """Updates the selected_server_addr when a row is clicked."""
+        selected_item = self.server_tree.focus()
+        if selected_item:
+            # The 'Address' column is at index 1 in the values tuple
+            addr = self.server_tree.item(selected_item, 'values')[1]
+            self.selected_server_addr = addr
+            self.status_label.config(text=f"Selected Server: {addr}", fg=self.highlight_color)
+        else:
+            self.selected_server_addr = None
+            self.status_label.config(text="Ready.", fg=self.text_color)
+
+    def _sanitize_string(self, text):
+        """Removes non-alphanumeric characters and converts to lowercase."""
+        if not isinstance(text, str):
+            return ""
+
+        text = text.lower()
+        text = text.replace('\xa0', ' ').replace('\u2003', ' ')
+        text = re.sub(r'[^a-z0-9 ]', '', text) 
+        return ' '.join(text.split()).strip()
+
+    def sort_column(self, col, reverse):
+        """Sorts Treeview contents when a column header is clicked."""
+        import sys
+
+        l = [(self.server_tree.set(k, col), k) for k in self.server_tree.get_children('')]
+        is_numeric = col in ('Ping', 'Players')
+        
+        if is_numeric:
+            def sort_key(item):
+                value = item[0]
+                if isinstance(value, str):
+                    try:
+                        return int(''.join(filter(str.isdigit, value)) or sys.maxsize)
+                    except ValueError:
+                        return sys.maxsize
+                return value
+            l.sort(key=sort_key, reverse=reverse)
+        else:
+            l.sort(key=lambda t: t[0].lower(), reverse=reverse)
+
+        for index, (val, k) in enumerate(l):
+            self.server_tree.move(k, '', index)
+
+        self.server_tree.heading(col, command=lambda: self.sort_column(col, not reverse))
+        arrow = ' ▼' if reverse else ' ▲' # ▼ = Descending (Highest First), ▲ = Ascending (Lowest First)
+        for c in self.server_tree["columns"]:
+            current_text = self.server_tree.heading(c, option="text")
+            # Remove any existing arrows
+            clean_text = current_text.replace(' ▲', '').replace(' ▼', '')
+            self.server_tree.heading(c, text=clean_text)
+
+        # Add the new arrow to the currently sorted column
+        current_text = self.server_tree.heading(col, option="text")
+        self.server_tree.heading(col, text=current_text + arrow)
+
+    def setup_sorting(self):
+        """Binds the sorting function to the relevant column headers."""
+        sortable_columns = ['Name', 'Address', 'Map', 'Players', 'Mod', 'GameType', 'Ping'] 
+        
+        for col in sortable_columns:
+            if col in self.server_tree["columns"]:
+                self.server_tree.heading(col, command=lambda c=col: self.sort_column(c, False))
+
+    def create_widgets(self):
+        # Configure the Ttk Treeview Style for Dark Theme
+        style = ttk.Style(self.window)
+        style.theme_use("default")
+
+        style.configure("Dark.Treeview", 
+                        background=self.dark_widget_color,
+                        foreground=self.text_color, 
+                        fieldbackground=self.dark_widget_color,
+                        rowheight=25,
+                        font=('Helvetica', 9))  # Smaller font to fit more
+                        
+        style.map('Dark.Treeview', 
+                  background=[('selected', self.highlight_color)],
+                  foreground=[('selected', self.text_color)])
+                  
+        style.configure("Dark.Treeview.Heading", 
+                        background=self.border_color,
+                        foreground=self.text_color,
+                        font=('Helvetica', 9, 'bold'))
+        style.map("Dark.Treeview.Heading", 
+                  background=[('active', self.highlight_color)])
+
+        # Main Frame Setup
+        main_frame = tk.Frame(self.window, bg=self.dark_background_color)
+        main_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        main_frame.grid_columnconfigure(0, weight=1)
+        main_frame.grid_rowconfigure(0, weight=1)
+
+        # Server List Frame Setup
+        list_frame = tk.Frame(main_frame, bg=self.dark_widget_color)
+        list_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 5))
+        list_frame.grid_columnconfigure(0, weight=1)
+        list_frame.grid_rowconfigure(0, weight=1)
+        
+        # Define the columns
+        all_columns = ('Name', 'Address', 'Map', 'Players', 'Password', 'Mod', 'GameType', 'Ping')
+        
+        # Scrollbars
+        list_vscrollbar = tk.Scrollbar(list_frame, orient=tk.VERTICAL, 
+                                       bg=self.border_color, troughcolor=self.dark_widget_color)
+        list_vscrollbar.grid(row=0, column=1, sticky="ns")
+
+        list_hscrollbar = tk.Scrollbar(list_frame, orient=tk.HORIZONTAL,
+                                       bg=self.border_color, troughcolor=self.dark_widget_color)
+        list_hscrollbar.grid(row=1, column=0, sticky="ew") 
+        
+        # Treeview setup
+        self.server_tree = ttk.Treeview(
+            list_frame, 
+            columns=all_columns, 
+            show='headings', 
+            yscrollcommand=list_vscrollbar.set,
+            xscrollcommand=list_hscrollbar.set,
+            style="Dark.Treeview"
+        )
+
+        list_vscrollbar.config(command=self.server_tree.yview)
+        list_hscrollbar.config(command=self.server_tree.xview)
+        self.server_tree.grid(row=0, column=0, sticky="nsew") 
+
+
+
+        # Define custom tags for content status colors
+        # RED: Outdated
+        self.server_tree.tag_configure('red_status', foreground='red') 
+        
+        # GREEN: Up-to-date
+        self.server_tree.tag_configure('green_status', foreground='green')
+        
+        # WHITE/Default: Not Downloaded, Not Found, or Error (use your default text color)
+        self.server_tree.tag_configure('white_status', foreground='white')
+        self.server_tree.tag_configure('orange_status', foreground='orange')
+
+
+
+        # Define column properties with better widths
+        self.server_tree.heading('Name', text='Server Name', anchor=tk.W)
+        self.server_tree.column('Name', width=300, stretch=tk.NO, anchor=tk.W) 
+
+        self.server_tree.heading('Address', text='IP:Port', anchor=tk.W)
+        self.server_tree.column('Address', width=150, stretch=tk.NO, anchor=tk.W) 
+        
+        self.server_tree.heading('Map', text='Map', anchor=tk.W)
+        self.server_tree.column('Map', width=120, stretch=tk.NO, anchor=tk.W)
+
+        self.server_tree.heading('Players', text='Players', anchor=tk.CENTER)
+        self.server_tree.column('Players', width=70, stretch=tk.NO, anchor=tk.CENTER)
+
+        self.server_tree.heading('Password', text='Lock', anchor=tk.CENTER)
+        self.server_tree.column('Password', width=40, stretch=tk.NO, anchor=tk.CENTER)
+
+        self.server_tree.heading('Mod', text='Mod', anchor=tk.W)
+        self.server_tree.column('Mod', width=150, stretch=tk.NO, anchor=tk.W)
+
+        self.server_tree.heading('GameType', text='Game Type', anchor=tk.W)
+        self.server_tree.column('GameType', width=100, stretch=tk.NO, anchor=tk.W)
+
+        self.server_tree.heading('Ping', text='Ping', anchor=tk.CENTER)
+        self.server_tree.column('Ping', width=250, stretch=tk.NO, anchor=tk.CENTER)
+
+        # Status and Control Frame
+        control_frame = tk.Frame(self.window, bg=self.dark_background_color)
+        control_frame.pack(fill="x", padx=5, pady=5)
+        control_frame.grid_columnconfigure(0, weight=1)
+        
+        self.status_label = tk.Label(control_frame, text="Ready.", bg=self.dark_background_color, fg=self.text_color, anchor="w")
+        self.status_label.grid(row=0, column=0, sticky="ew")
+        
+        button_frame = tk.Frame(control_frame, bg=self.dark_background_color)
+        button_frame.grid(row=0, column=1, sticky="e")
+
+        self.join_button = tk.Button(button_frame, text="[?]", command=self.show_mbii_warning, 
+                                     bg=self.highlight_color, fg=self.text_color, 
+                                     activebackground=self.border_color, relief="raised")
+        self.join_button.pack(side=tk.LEFT, padx=5)
+
+        self.join_button = tk.Button(button_frame, text="Join Server", command=self.join_selected_server, 
+                                     bg=self.highlight_color, fg=self.text_color, 
+                                     activebackground=self.border_color, relief="raised", font=('Helvetica', 9, 'bold'))
+        self.join_button.pack(side=tk.LEFT, padx=5)
+
+        self.filter_button = tk.Button(button_frame, text="Filter", command=self.open_filter_popup, 
+                                      bg=self.border_color, fg=self.text_color, 
+                                      activebackground=self.highlight_color, relief="raised")
+        self.filter_button.pack(side=tk.LEFT, padx=5)
+        
+        self.refresh_button = tk.Button(button_frame, text="Refresh", command=self.fetch_servers, 
+                                       bg=self.border_color, fg=self.text_color, 
+                                       activebackground=self.highlight_color, relief="raised")
+        self.refresh_button.pack(side=tk.LEFT, padx=5)
+
+        self.server_tree.bind('<<TreeviewSelect>>', self.on_server_select)
+        # Handle double clicking
+        self.server_tree.bind('<Double-1>', lambda event: self.join_selected_server()) 
+
+    def show_mbii_warning(self):
+        """
+        Displays a message box with a warning about server anti-cheat settings
+        for a specific platform.
+        """
+        root = tk.Tk()
+        root.withdraw()  # Hides the main tkinter window
+
+        message_title = "MBII Platform Warning"
+        message_text = (
+            "Ensure the servers you are joining uses g_AntiCheat 0 in order to "
+            "use this platform without official MBII launcher errors."
+       )
+
+        self.show_custom_messagebox(message_title, message_text)
+
+    def join_selected_server(self):
+        """Enhanced join server method with content checking."""
+        if not self.selected_server_addr:
+            self.show_custom_messagebox("Error", "Please select a server to join.")
+            return
+
+        # Get the selected server data
+        selected_server = None
+        for server in self.servers:
+            if server.get('addr') == self.selected_server_addr:
+                selected_server = server
+                break
+        
+        if not selected_server:
+            self.show_custom_messagebox("Error", "Could not find selected server data.")
+            return
+        
+        server_hostname = selected_server.get('hostname', 'Unknown Server')
+        
+        # Check content status
+        content_status = self.check_server_content_status(server_hostname)
+        
+        # Show appropriate dialog based on status
+        if not self.show_content_status_dialog(server_hostname, content_status):
+            return  # User cancelled or chose to download/update content
+        
+        # Continue with existing join logic
+        cache_dir = os.path.join(os.path.dirname(sys.argv[0]), "cache")
+        config_path = os.path.join(cache_dir, "mbiidirectory.json")
+        
+        config_data = read_json_file(config_path)
+
+        if not config_data or 'path' not in config_data:
+            self.show_custom_messagebox("Error", "MBII game directory not found. Please set the directory in the updater first.")
+            return
+
+        mbii_dir = config_data['path']
+        gamedata_dir = os.path.dirname(mbii_dir)
+        
+        if sys.platform.startswith('win'):
+            executable = os.path.join(gamedata_dir, "mbii.x86.exe")
+        else:
+            executable = os.path.join(gamedata_dir, "mbii.i386")
+        
+        if not os.path.exists(executable):
+            self.show_custom_messagebox("Error", f"Game executable not found at: {executable}")
+            return
+
+        # Check for password protection
+        password = None
+        if selected_server.get('passworded', False):
+            password = self.ask_for_password(server_hostname)
+            if password is None:
+                return
+
+        # Build command
+        command = [
+            executable,
+            '+set', 'fs_game', 'MBII',
+            '+connect', self.selected_server_addr
+        ]
+        
+        if password:
+            command.extend(['+password', password])
+
+        try:
+            import subprocess
+            subprocess.Popen(command, cwd=gamedata_dir)
+            if password:
+                self.show_custom_messagebox("Success", f"Launching game and attempting to connect to {self.selected_server_addr} with password")
+            else:
+                self.show_custom_messagebox("Success", f"Launching game and attempting to connect to {self.selected_server_addr}")
+            self.window.destroy()
+        except Exception as e:
+            self.show_custom_messagebox("Launch Error", f"Failed to launch game: {e}")
+
+    def show_content_status_dialog(self, server_hostname, content_status):
+        """
+        Shows appropriate dialog based on content status.
+        
+        Returns:
+            True: If joining should proceed (Green, Not Found, or 'Join Anyway').
+            False: If joining should be cancelled or user chose to update/download.
+        """
+        status = content_status['status']
+        repo = content_status['repo']
+        latest_tag = content_status['latest_tag']
+        local_tag = content_status['local_tag']
+        
+        # Handle the failure state gracefully
+        if status == 'error_check_failed':
+            self.show_custom_messagebox("Warning", "Could not verify content status due to an internal error. Joining server directly.", icon_type='warning')
+            return True # Proceed to joining, don't block the user
+            
+        if status in ['not_found', 'up-to-date']:
+            # No associated content or content is up-to-date. Proceed directly.
+            return True 
+
+        repo_name = repo.get('custom_name') or "Content"
+        
+        if status == 'outdated':
+            # Red: Shows update dialog
+            message = (
+                f"Content '{repo_name}' is outdated.\n"
+                f"Local version: {local_tag}\n"
+                f"Latest version: {latest_tag}\n\n"
+                "Do you want to update, join anyway, or cancel?"
+            )
+            
+            action = self._prompt_update_dialog(content_name=repo_name, message=message)
+            
+            if action == 'join':
+                return True # Proceed to joining logic
+            elif action == 'update':
+                self.open_content_page() # Redirect to the content tab
+                return False
+            
+            return False # Cancel
+
+        elif status == 'not_downloaded':
+            # Not Downloaded: Shows download dialog
+            # MESSAGE IS UPDATED TO REFLECT NEW JOIN OPTION
+            message = f"The content '{repo_name}' required for this server is not downloaded.\n\nDo you want to download it now, join anyway, or cancel?"
+            
+            action = self._prompt_download_dialog(content_name=repo_name, message=message)
+            
+            if action == 'join':
+                return True # PROCEED TO JOINING
+            elif action == 'download':
+                self.open_content_page() # Redirect to the content tab
+                return False
+            
+            return False # Cancel
+        
+        return True # Default safe path to join
+
+    def ask_for_password(self, server_name):
+        """Creates a custom password input dialog and returns the entered password or None if canceled."""
+        password_result = None
+        
+        popup = tk.Toplevel(self.window)
+        popup.title("Server Password Required")
+        popup.configure(bg=self.dark_background_color)
+        popup.resizable(False, False)
+        popup.grab_set()
+        
+        if self.icon_path_ico:
+            popup.iconbitmap(self.icon_path_ico)
+            
+        # Center the popup
+        popup.geometry("400x200")
+        x = self.window.winfo_x() + self.window.winfo_width() // 2 - 200
+        y = self.window.winfo_y() + self.window.winfo_height() // 2 - 100
+        popup.geometry(f'+{x}+{y}')
+
+        # Main frame
+        main_frame = tk.Frame(popup, bg=self.dark_background_color, padx=20, pady=20)
+        main_frame.pack(expand=True, fill="both")
+        
+        # Lock icon
+        lock_label = tk.Label(main_frame, text="🔒", font=("Helvetica", 24), 
+                             bg=self.dark_background_color, fg="orange")
+        lock_label.pack(pady=(0, 10))
+        
+        # Server name label
+        server_label = tk.Label(main_frame, text=f"Server: {server_name}", 
+                               font=("Helvetica", 10, "bold"), 
+                               bg=self.dark_background_color, fg=self.text_color,
+                               wraplength=360)
+        server_label.pack(pady=(0, 5))
+        
+        # Info label
+        info_label = tk.Label(main_frame, text="This server requires a password to join:", 
+                             font=("Helvetica", 9), 
+                             bg=self.dark_background_color, fg=self.text_color)
+        info_label.pack(pady=(0, 10))
+        
+        # Password entry frame
+        entry_frame = tk.Frame(main_frame, bg=self.dark_background_color)
+        entry_frame.pack(fill="x", pady=(0, 15))
+        
+        password_label = tk.Label(entry_frame, text="Password:", font=("Helvetica", 9), 
+                                 bg=self.dark_background_color, fg=self.text_color)
+        password_label.pack(side=tk.LEFT)
+        
+        password_entry = tk.Entry(entry_frame, show="*", font=("Helvetica", 10), 
+                                 bg="#f0f0f0", fg="black", width=25)
+        password_entry.pack(side=tk.LEFT, padx=(10, 0), fill="x", expand=True)
+        password_entry.focus_set()  # Focus on the password entry
+        
+        # Button frame
+        button_frame = tk.Frame(main_frame, bg=self.dark_background_color)
+        button_frame.pack()
+        
+        def on_connect():
+            nonlocal password_result
+            password_result = password_entry.get().strip()
+            popup.destroy()
+        
+        def on_cancel():
+            nonlocal password_result
+            password_result = None
+            popup.destroy()
+        
+        # Connect button
+        connect_button = tk.Button(button_frame, text="Connect", command=on_connect,
+                                  bg="#4CAF50", fg="white", 
+                                  activebackground="#45a049", relief="raised", 
+                                  font=("Helvetica", 9, "bold"), width=10)
+        connect_button.pack(side=tk.LEFT, padx=(0, 5))
+        connect_button.bind("<Enter>", lambda e: e.widget.configure(bg="#45a049"))
+        connect_button.bind("<Leave>", lambda e: e.widget.configure(bg="#4CAF50"))
+        
+        # Cancel button
+        cancel_button = tk.Button(button_frame, text="Cancel", command=on_cancel,
+                                 bg="#e74c3c", fg="white", 
+                                 activebackground="#c0392b", relief="raised", 
+                                 font=("Helvetica", 9, "bold"), width=10)
+        cancel_button.pack(side=tk.LEFT, padx=(5, 0))
+        cancel_button.bind("<Enter>", lambda e: e.widget.configure(bg="#c0392b"))
+        cancel_button.bind("<Leave>", lambda e: e.widget.configure(bg="#e74c3c"))
+        
+        # Allow Enter key to connect and Escape to cancel
+        password_entry.bind('<Return>', lambda e: on_connect())
+        popup.bind('<Escape>', lambda e: on_cancel())
+        
+        popup.wait_window()
+        return password_result
+
+    def fetch_servers(self):
+        self.status_label.config(text=f"Fetching servers...", fg="#3498db")
+        self.refresh_button.config(state="disabled")
+        self.filter_button.config(state="disabled")
+        threading.Thread(target=self._fetch_servers_thread, daemon=True).start()
+
+    def _fetch_servers_thread(self):
+        """Fetch servers with diagnostic output"""
+        JKHUB_SCRAPER_URL = "https://jkhubservers.appspot.com"
+        MAX_PING_THREADS = 20 # Limit the number of concurrent pings
+
+        try:
+            print("Using diagnostic web scraper...")
+            new_servers = scrape_jkhub_servers(JKHUB_SCRAPER_URL)
+            
+            # --- Step 2: PARALLEL PINGING LOOP ---
+            # Use a ThreadPoolExecutor to run ping_server for many servers at once.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_PING_THREADS) as executor:
+                future_to_server = {}
+                
+                # 1. Submit ping tasks to the pool
+                for server in new_servers:
+                    addr = server.get('addr')
+                    ip, port = None, None
+                    
+                    if ':' in addr:
+                        try:
+                            # Extract IP and Port from the 'addr' field
+                            ip, port_str = addr.rsplit(':', 1)
+                            port = int(port_str)
+                        except ValueError:
+                            # Skip server if address parsing fails
+                            server['ping'] = 'Parse Error'
+                            continue
+
+                    if ip and port:
+                        # Submit the ping function call to the thread pool
+                        future = executor.submit(ping_server, ip, port)
+                        future_to_server[future] = server
+                    else:
+                        server['ping'] = 'Invalid Addr'
+
+                # 2. Collect results as they complete
+                for future in concurrent.futures.as_completed(future_to_server):
+                    server = future_to_server[future]
+                    try:
+                        ping_result = future.result()
+                        
+                        # Update the 'ping' key based on the result
+                        if ping_result == -1:
+                            server['ping'] = 'Error'
+                        elif ping_result == 999:
+                            server['ping'] = 'Timeout'
+                        else:
+                            server['ping'] = str(ping_result)
+                            
+                    except Exception as exc:
+                        print(f'{server.get("addr")} generated an exception: {exc}')
+                        server['ping'] = 'Error'
+
+            self.servers = new_servers
+
+            # --- CRITICAL DIAGNOSTIC LOGGING ---
+            # Print the ping of the first three servers to confirm update success
+            print("\n--- PINGING DIAGNOSTIC (After Pinging) ---")
+            for i, server in enumerate(self.servers[:3]):
+                print(f"Server {i+1} Ping Value in Memory: {server.get('ping', 'Error')}")
+            print("------------------------------------------\n")
+            
+            if self.servers:
+                print(f"Scraper returned {len(self.servers)} servers, pinging complete.")
+                
+                try:
+                    if self.window.winfo_exists():
+                        # Step 3: Display results on the main thread
+                        self.window.after(0, self.display_servers)
+                except tk.TclError:
+                    return
+            else:
+                print("Scraper returned no servers")
+                try:
+                    if self.window.winfo_exists():
+                        self.window.after(0, lambda: self.status_label.config(text="Error: No servers found", fg="#e74c3c"))
+                except tk.TclError:
+                    return
+                        
+        except Exception as e:
+            print(f"Error in fetch thread: {e}")
+            try:
+                if self.window.winfo_exists():
+                    self.window.after(0, lambda: self.status_label.config(text=f"Error: {str(e)}", fg="#e74c3c"))
+            except tk.TclError:
+                pass
+        finally:
+            try:
+                if self.window.winfo_exists():
+                    self.window.after(0, lambda: self.refresh_button.config(state="normal"))
+                    self.window.after(0, lambda: self.filter_button.config(state="normal"))
+            except tk.TclError:
+                pass
+
+
+    def display_servers(self):
+        """Display servers with improved filtering"""
+        # Clear existing entries
+        for item in self.server_tree.get_children():
+            self.server_tree.delete(item)
+
+        print(f"\n--- FILTER DEBUG: Looking for '{self.mod_filter}' ---")
+        mod_strings_to_check = self.mod_name_map.get(self.mod_filter, [])
+        print(f"Filter strings: {mod_strings_to_check}")
+
+        if self.mod_filter == 'All Mods':
+            filtered_servers = self.servers
+        else:
+            filtered_servers = []
+            for server in self.servers:
+                server_mod_raw = server.get('mod', 'n/a')
+                server_mod_sanitized = self._sanitize_string(server_mod_raw)
+                
+                found_match = False
+                for mod_string in mod_strings_to_check:
+                    sanitized_filter = self._sanitize_string(mod_string)
+                    if sanitized_filter and sanitized_filter in server_mod_sanitized:
+                        found_match = True
+                        break
+                
+                if found_match:
+                    filtered_servers.append(server)
+
+        print(f"Filtered {len(self.servers)} -> {len(filtered_servers)} servers")
+
+        # Populate the tree
+        for i, server in enumerate(filtered_servers):
+            hostname = server.get('hostname', 'Unknown Server')
+            addr = server.get('addr', 'N/A')
+            mapname = server.get('mapname', 'N/A')
+            clients = str(server.get('clients', 'N/A'))
+
+            # FIXED: Use 'passworded' instead of 'password'
+            is_passworded = server.get('passworded', False)
+            password_status = "🔒" if is_passworded else ""
+
+            mod = server.get('mod', 'N/A')
+            gametype = server.get('gametype', 'N/A')
+            ping = str(server.get('ping', 'N/A'))
+
+            icon_prefix = self._get_server_icon_prefix(hostname)
+            color_tag = self._get_content_status_color(hostname)
+
+            display_hostname = hostname + '     ' + icon_prefix
+
+            self.server_tree.insert('', 'end', iid=f"server_{i}", 
+                                   values=(display_hostname, addr, mapname, clients, password_status, mod, gametype, ping),
+                                   tags=(color_tag,))
+
+        status_text = f"Loaded {len(self.servers)} servers. Displaying {len(filtered_servers)} for '{self.mod_filter}'"
+        self.status_label.config(text=status_text, fg=self.text_color)
+
+        if filtered_servers:
+            self.sort_column(self.sort_col, self.sort_dir)
+
+    def open_filter_popup(self):
+        """Opens filter popup"""
+        MOD_OPTIONS = ['All Mods'] + sorted([key for key in self.mod_name_map.keys() if key != 'All Mods'])
+
+        if self.filter_popup and self.filter_popup.winfo_exists():
+            self.filter_popup.focus_set()
+            return
+
+        self.filter_popup = tk.Toplevel(self.window)
+        self.filter_popup.title("Filter by Mod")
+        self.filter_popup.configure(bg=self.dark_background_color)
+        self.filter_popup.transient(self.window)
+        self.filter_popup.geometry("300x400")
+        
+        if self.icon_path_ico:
+            self.filter_popup.iconbitmap(self.icon_path_ico)
+
+        tk.Label(self.filter_popup, text="Select Mod to Display:",
+                 bg=self.dark_background_color, fg=self.text_color, 
+                 font=('Helvetica', 10, 'bold')).pack(pady=10, padx=10)
+
+        self.mod_filter_var = tk.StringVar(self.filter_popup, value=self.mod_filter)
+
+        for mod_name in MOD_OPTIONS:
+            rb = tk.Radiobutton(self.filter_popup, text=mod_name, variable=self.mod_filter_var, 
+                               value=mod_name, bg=self.dark_background_color, fg=self.text_color, 
+                               selectcolor=self.dark_widget_color, relief='flat', 
+                               activebackground=self.dark_background_color, 
+                               activeforeground=self.text_color)
+            rb.pack(anchor='w', padx=20, pady=2)
+
+        button_frame = tk.Frame(self.filter_popup, bg=self.dark_background_color)
+        button_frame.pack(pady=15, padx=20)
+
+        apply_button = tk.Button(button_frame, text="Apply Filter", command=self.apply_mod_filter, 
+                                bg=self.highlight_color, fg=self.text_color, 
+                                activebackground=self.border_color, 
+                                relief="raised", font=("Helvetica", 9, "bold"))
+        apply_button.pack(side=tk.LEFT, padx=5)
+
+        cancel_button = tk.Button(button_frame, text="Cancel", command=self.filter_popup.destroy, 
+                                 bg=self.border_color, fg=self.text_color, 
+                                 activebackground=self.highlight_color, 
+                                 relief="raised", font=("Helvetica", 9, "bold"))
+        cancel_button.pack(side=tk.LEFT, padx=5)
+        
+        # Center the popup
+        self.filter_popup.update_idletasks()
+        x = self.window.winfo_x() + self.window.winfo_width() // 2 - self.filter_popup.winfo_width() // 2
+        y = self.window.winfo_y() + self.window.winfo_height() // 2 - self.filter_popup.winfo_height() // 2
+        self.filter_popup.geometry(f'+{x}+{y}')
+
+    def apply_mod_filter(self):
+        """Apply the selected mod filter"""
+        self.mod_filter = self.mod_filter_var.get()
+        self.filter_popup.destroy()
+        self.display_servers()
+
+    def load_servers_config(self):
+        """Load the servers.json configuration file from cache."""
+        self.servers_config_file = os.path.join(os.path.dirname(sys.argv[0]), "cache", "servers.json")
+        if os.path.exists(self.servers_config_file):
+            try:
+                with open(self.servers_config_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"Error reading servers config: {e}")
+                return {}
+        return {}
+
+    def load_repositories_config(self):
+        """Load the repositories.json configuration from cache."""
+        self.repos_config_file = os.path.join(os.path.dirname(sys.argv[0]), "cache", "repositories.json")
+        if os.path.exists(self.repos_config_file):
+            try:
+                with open(self.repos_config_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"Error reading repositories config: {e}")
+                return []
+        return []
+
+    def load_client_data(self):
+        """Load client.json to check download status."""
+        self.client_config_file = os.path.join(os.path.dirname(sys.argv[0]), "cache", "client.json")
+        if os.path.exists(self.client_config_file):
+            try:
+                with open(self.client_config_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"Error reading client config: {e}")
+                return {}
+        return {}
+
+    def check_server_content_status(self, server_hostname):
+        """
+        Checks the server's content requirements using the parent app's logic.
+
+        Returns: A dictionary with 'status', 'repo', 'latest_tag', and 'local_tag'.
+        """
+        # The default safe return dictionary, used if any logic below fails
+        safe_return = {'status': 'error_check_failed', 'repo': None, 'latest_tag': None, 'local_tag': None}
+        
+        try:
+            # Calls Manager method, which returns dict or None
+            matching_repo = self.parent_app.get_matching_repository(server_hostname)
+
+            if matching_repo is None:
+                # Case 1: No content associated. Returns clean dictionary.
+                return {'status': 'not_found', 'repo': None, 'latest_tag': None, 'local_tag': None}
+
+            # Calls Manager method, which MUST return a tuple (status, tag)
+            status, latest_tag = self.parent_app.get_content_status(matching_repo)
+
+            # Accesses data from the Manager
+            local_tag = self.parent_app.client_data.get(matching_repo.get('url'), {}).get('last_tag')
+            
+            # Case 2: Success. Returns the full dictionary.
+            return {
+                'status': status,
+                'repo': matching_repo,
+                'latest_tag': latest_tag,
+                'local_tag': local_tag
+            }
+
+        except Exception as e:
+            # Case 3: Any unexpected error (like network failure or bad data)
+            # Log the error (optional)
+            print(f"Error checking content status for {server_hostname}: {e}")
+            # Return the safe dictionary instead of crashing
+            return safe_return
+
+    def check_server_content_status(self, server_hostname):
+        """
+        Checks the server's content requirements using the parent app's logic.
+
+        Returns: A dictionary with 'status', 'repo', 'latest_tag', and 'local_tag'.
+        """
+        # The default safe return dictionary, used if any logic below fails
+        safe_return = {'status': 'error_check_failed', 'repo': None, 'latest_tag': None, 'local_tag': None}
+        
+        try:
+            # 1. Calls Manager method, which returns dict or None
+            matching_repo = self.parent_app.get_matching_repository(server_hostname)
+
+            if matching_repo is None:
+                # Case 1: No content associated. Returns clean dictionary.
+                return {'status': 'not_found', 'repo': None, 'latest_tag': None, 'local_tag': None}
+
+            # 2. Calls Manager method, which MUST return a tuple (status, tag)
+            status, latest_tag = self.parent_app.get_content_status(matching_repo)
+
+            # 3. Accesses data from the Manager
+            local_tag = self.parent_app.client_data.get(matching_repo.get('url'), {}).get('last_tag')
+            
+            # Case 2: Success. Returns the full dictionary.
+            return {
+                'status': status,
+                'repo': matching_repo,
+                'latest_tag': latest_tag,
+                'local_tag': local_tag
+            }
+
+        except Exception as e:
+            # CRITICAL FIX: If ANYTHING fails (network error, bad logic, etc.), 
+            # we return the safe dictionary instead of a string, preventing the TypeError crash.
+            print(f"Error checking content status for {server_hostname}: {e}")
+            return safe_return
+
+    def _prompt_update_dialog(self, content_name, message):
+        """
+        Custom dialog placeholder asking user to Update, Join Anyway, or Cancel.
+        Uses a Tkinter Toplevel window to control the look and feel.
+        Returns: 'update', 'join', or 'cancel'.
+        """
+        result = 'cancel'
+        
+        popup = tk.Toplevel(self.window)
+        popup.title(f"Update Required: {content_name}")
+        popup.configure(bg=self.dark_background_color)
+        popup.geometry("400x150")
+        if self.icon_path_ico:
+            popup.iconbitmap(self.icon_path_ico)
+
+        def on_update():
+            nonlocal result
+            result = 'update'
+            popup.destroy()
+
+        def on_join():
+            nonlocal result
+            result = 'join'
+            popup.destroy()
+            
+        def on_cancel():
+            nonlocal result
+            result = 'cancel'
+            popup.destroy()
+            
+        tk.Label(popup, text=message, bg=self.dark_background_color, fg=self.text_color, justify=tk.CENTER, wraplength=380).pack(pady=10, padx=10)
+
+        button_frame = tk.Frame(popup, bg=self.dark_background_color)
+        button_frame.pack()
+        
+        # Update Button
+        tk.Button(button_frame, text="Update Content", command=on_update,
+                   bg="#3498db", fg="white", activebackground="#2980b9", 
+                   relief="raised", font=("Helvetica", 9, "bold"), width=12).pack(side=tk.LEFT, padx=5)
+
+        # Join Anyway Button
+        tk.Button(button_frame, text="Join Anyway", command=on_join,
+                   bg="#f39c12", fg="white", activebackground="#e67e22", 
+                   relief="raised", font=("Helvetica", 9, "bold"), width=12).pack(side=tk.LEFT, padx=5)
+
+        # Cancel Button
+        tk.Button(button_frame, text="Cancel", command=on_cancel,
+                   bg="#e74c3c", fg="white", activebackground="#c0392b", 
+                   relief="raised", font=("Helvetica", 9, "bold"), width=12).pack(side=tk.LEFT, padx=5)
+        
+        popup.wait_window()
+        return result
+
+    def _prompt_download_dialog(self, content_name, message):
+        """
+        Custom dialog asking user to Download, Join Anyway, or Cancel.
+        Returns: 'download', 'join', or 'cancel'.
+        """
+        import tkinter as tk
+        result = 'cancel'
+        
+        popup = tk.Toplevel(self.window)
+        popup.title(f"Content Missing: {content_name}")
+        popup.configure(bg=self.dark_background_color)
+        
+        # Increase geometry to ensure three buttons fit
+        popup.geometry("450x150") 
+        if self.icon_path_ico:
+            popup.iconbitmap(self.icon_path_ico)
+
+        def on_download():
+            nonlocal result
+            result = 'download'
+            popup.destroy()
+            
+        def on_join(): # Handler for the new button
+            nonlocal result
+            result = 'join'
+            popup.destroy()
+
+        def on_cancel():
+            nonlocal result
+            result = 'cancel'
+            popup.destroy()
+            
+        tk.Label(popup, text=message, bg=self.dark_background_color, fg=self.text_color, justify=tk.CENTER, wraplength=430).pack(pady=10, padx=10)
+
+        button_frame = tk.Frame(popup, bg=self.dark_background_color)
+        button_frame.pack()
+        
+        # 1. Download Button (GREEN)
+        tk.Button(button_frame, text="Download Content", command=on_download,
+                   bg="#4CAF50", fg="white", activebackground="#45a049", 
+                   relief="raised", font=("Helvetica", 9, "bold"), width=15).pack(side=tk.LEFT, padx=5)
+
+        # 2. Join Anyway Button (ORANGE/YELLOW) - THE MISSING BUTTON
+        tk.Button(button_frame, text="Join Anyway", command=on_join,
+                   bg="#f39c12", fg="white", activebackground="#e67e22", 
+                   relief="raised", font=("Helvetica", 9, "bold"), width=15).pack(side=tk.LEFT, padx=5)
+
+        # 3. Cancel Button (RED)
+        tk.Button(button_frame, text="Cancel", command=on_cancel,
+                   bg="#e74c3c", fg="white", activebackground="#c0392b", 
+                   relief="raised", font=("Helvetica", 9, "bold"), width=15).pack(side=tk.LEFT, padx=5)
+        
+        popup.wait_window()
+        return result
+
+    def _get_content_status_color(self, server_hostname):
+        """
+        Determines the required color tag based on content status.
+        Returns 'red_status', 'green_status', 'orange_status', or 'white_status'.
+        """
+        content_status = self.check_server_content_status(server_hostname)
+        status = content_status['status']
+        
+        if status == 'outdated':
+            return 'red_status'
+        elif status == 'up-to-date':
+            return 'green_status'
+        elif status == 'not_downloaded':
+            # FIX: If not downloaded, the row status is orange
+            return 'orange_status' 
+        else: # 'not_found', 'error_check_failed'
+            return 'white_status'
+
+    def _get_server_icon_prefix(self, server_hostname):
+        """
+        Returns a symbol if the server requires content that is not downloaded, 
+        otherwise returns an empty string.
+        """
+        # Uses the crash-proof check_server_content_status method
+        content_status = self.check_server_content_status(server_hostname)
+        status = content_status['status']
+        
+        # We will use a downward arrow symbol to signify "Download Required"
+        if status == 'not_downloaded':
+            return "[↓] " 
+        
+        return ""
+
+    def open_content_page(self):
+        """Switch to the content page (close server browser and focus main window)."""
+        # NOTE: This only closes the server browser. 
+        # Logic to switch the main app's tabs must be handled in GitHubReleaseManager.
+        self.show_custom_messagebox("Redirected", "Switched to Content tab to manage downloads.")
+        self.window.destroy()  # Close server browser
+
+if __name__ == '__main__':
     root = tk.Tk()
-    app = GitHubReleaseManager(root)
+    # Apply global background color before main app takes over
+    root.configure(bg="#121212")
+    GitHubReleaseManager(root)
     root.mainloop()
