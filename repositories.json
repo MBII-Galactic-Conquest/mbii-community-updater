@@ -1,14 +1,14 @@
 [
     {
         "name": "MBII-Galactic-Conquest/clientize",
-		"custom_name": "Supremacy",
+        "custom_name": "Supremacy",
         "description": "Client assets for the MBII Supremacy Project",
         "url": "https://github.com/MBII-Galactic-Conquest/clientize"
     },
     {
         "name": "Kir-Kanos/Freaky-Ascendant-FA",
-		"custom_name": "*freaky* Ascendant FA",
-        "description": "Moviebattles 2 Freaky Community Custom FA",
+        "custom_name": "*freaky*CustomFA[Ascendant]",
+        "description": "MBII Freaky Community Custom FA",
         "url": "https://github.com/Kir-Kanos/Freaky-Ascendant-FA"
     }
 ]
