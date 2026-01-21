@@ -10,5 +10,11 @@
         "custom_name": "*freaky*TestSite[K]",
         "description": "MBII Freaky Community Custom FA",
         "url": "https://github.com/Kir-Kanos/Freaky-Ascendant-FA"
+    },
+    {
+        "name": "Effacer/expel-effacer",
+        "custom_name": "Expel Pack",
+        "description": "FA First Order v Resistance",
+        "url": "https://github.com/Effacer/expel-effacer"
     }
 ]
