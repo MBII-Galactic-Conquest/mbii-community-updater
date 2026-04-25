@@ -324,7 +324,7 @@ class GitHubReleaseManager:
             master (tk.Tk): The main window object.
         """
         self.master = master
-        self.master.title("MBII Community Updater")
+        self.master.title("Moviebattles Community Updater")
         
         # Set a compact, non-resizable window size
         self.master.geometry("502x351")

@@ -1,4 +1,5 @@
 pyinstaller --noconsole --onefile ^
+  --icon "icon.ico" ^
   --add-data "background.png;." ^
   --add-data "background.jpg;." ^
   --add-data "icon.ico;." ^
