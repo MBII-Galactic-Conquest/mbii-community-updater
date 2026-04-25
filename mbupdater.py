@@ -930,12 +930,12 @@ class GitHubReleaseManager:
         """Opens a file dialog for the user to select a download directory and validates it."""
         path = filedialog.askdirectory()
         if path:
-            if 'MBII' in path.upper():
+            if 'mbii' in path.lower() or 'mbiii' in path.lower():
                 self.download_path = path
                 self.download_path_var.set(path)
                 self.save_mbii_directory(path)
             else:
-                self.show_custom_messagebox("Invalid Directory", "The selected directory must contain 'MBII' in its name.", icon_type='error')
+                self.show_custom_messagebox("Invalid Directory", "The selected directory must contain 'MBII' or 'MBIII' in its name.", icon_type='error')
                 self.download_path = None
                 self.download_path_var.set("Not Set")
         self.update_download_button_state()
@@ -1052,7 +1052,12 @@ class GitHubReleaseManager:
         """Updates the download button state based on all prerequisites being met."""
         is_repo_selected = self.selected_repo_url is not None
         is_version_selected = self.selected_release_tag is not None
-        is_path_valid = self.download_path is not None and os.path.isdir(self.download_path) and 'MBII' in self.download_path.upper()
+        p = self.download_path.lower() if self.download_path else ""
+        is_path_valid = (
+            self.download_path is not None and
+            os.path.isdir(self.download_path) and
+            any(k in p for k in ['mbii', 'mbiii'])
+        )
         
         if is_repo_selected and is_version_selected and is_path_valid:
             self.download_button.config(state="normal")
@@ -1068,8 +1073,14 @@ class GitHubReleaseManager:
 
     def on_download(self):
         """Starts the download process in a separate thread."""
-        if not self.download_path or 'MBII' not in self.download_path.upper():
-            self.show_custom_messagebox("Error", "Please select a valid MBII Directory first.", icon_type='error')
+        p = self.download_path.lower() if self.download_path else ""
+
+        if not self.download_path or not any(k in p for k in ['mbii', 'mbiii']):
+            self.show_custom_messagebox(
+                "Error",
+                "Please select a valid MBII or MBIII directory first.",
+                icon_type='error'
+            )
             return
 
         if not self.selected_release_tag or self.selected_release_tag not in self.available_releases:
@@ -1653,16 +1664,16 @@ class ServerBrowser:
         config_data = read_json_file(config_path)
 
         if not config_data or 'path' not in config_data:
-            self.show_custom_messagebox("Error", "MBII game directory not found. Please set the directory in the updater first.")
+            self.show_custom_messagebox("Error", "MBII or MBIII game directory not found. Please set the directory in the updater first.")
             return
 
         mbii_dir = config_data['path']
         gamedata_dir = os.path.dirname(mbii_dir)
         
         if sys.platform.startswith('win'):
-            executable = os.path.join(gamedata_dir, "mbii.x86.exe")
+            executable = os.path.join(gamedata_dir, "MBIII.x86.exe")
         else:
-            executable = os.path.join(gamedata_dir, "mbii.i386")
+            executable = os.path.join(gamedata_dir, "MBIII.i386")
         
         if not os.path.exists(executable):
             self.show_custom_messagebox("Error", f"Game executable not found at: {executable}")
