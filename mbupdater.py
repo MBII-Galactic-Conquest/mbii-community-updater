@@ -2,7 +2,6 @@ import tkinter as tk
 from tkinter import ttk, filedialog
 import concurrent.futures
 import threading
-import requests
 import json
 import os
 import itertools
@@ -13,38 +12,199 @@ import time
 import io
 import sys
 import re
+import ctypes as _ct
+import urllib.request as _ureq
+import urllib.error as _uerr
+from html.parser import HTMLParser as _HTMLParser
 
 # ====================================================================
 # REQUIRED MODULES:
 # These are the modules that need to be installed via pip.
-# You can install them by running this command in your terminal:
-# pip install requests Pillow pygame
+# pip install Pillow
 # ====================================================================
 
 try:
     from PIL import Image, ImageTk
 except ImportError:
-    # Use a custom messagebox for this error as well
     root_error = tk.Tk()
     root_error.withdraw()
     tk.messagebox.showerror("Error", "The Pillow library is not installed. Please install it with 'pip install Pillow' and restart the application.")
     sys.exit()
 
-try:
-    import pygame.mixer as mixer
-except ImportError:
-    root_error = tk.Tk()
-    root_error.withdraw()
-    tk.messagebox.showerror("Error", "The Pygame library is not installed. Please install it with 'pip install pygame' and restart the application.")
-    sys.exit()
+# --- stdlib replacement for requests ---
+class _Resp:
+    def __init__(self, code, body, hdrs):
+        self.status_code = code
+        self.content = body
+        self.text = body.decode('utf-8', errors='replace')
+        self.headers = hdrs
+    def json(self):
+        return json.loads(self.content)
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.exceptions.HTTPError(f"HTTP {self.status_code}", response=self)
 
-try:
-    from bs4 import BeautifulSoup
-except ImportError:
-    root_error = tk.Tk()
-    root_error.withdraw()
-    tk.messagebox.showerror("Error", "The BeautifulSoup library is not installed. Please install it with 'pip install beautifulsoup4 lxml' and restart the application.")
-    sys.exit()
+class _Requests:
+    class exceptions:
+        class RequestException(OSError): pass
+        class HTTPError(OSError):
+            def __init__(self, msg='', response=None):
+                super().__init__(msg)
+                self.response = response
+
+    @staticmethod
+    def get(url, headers=None, timeout=30, stream=False):  # noqa: stream kept for API compat
+        import gzip as _gzip, ssl as _ssl
+        ctx = _ssl.create_default_context()
+        req = _ureq.Request(url, headers=headers or {})
+        req.add_unredirected_header('Accept-Encoding', 'gzip, identity')
+        try:
+            with _ureq.urlopen(req, timeout=timeout, context=ctx) as r:
+                body = r.read()
+                if r.headers.get('Content-Encoding') == 'gzip':
+                    body = _gzip.decompress(body)
+                return _Resp(r.status, body, dict(r.headers))
+        except _uerr.HTTPError as e:
+            body = e.read()
+            resp = _Resp(e.code, body, dict(e.headers))
+            raise requests.exceptions.HTTPError(str(e), response=resp) from None
+        except _uerr.URLError as e:
+            raise requests.exceptions.RequestException(str(e)) from None
+
+requests = _Requests()
+
+# --- stdlib replacement for pygame.mixer ---
+class _MciMixer:
+    _send = _ct.windll.winmm.mciSendStringW
+    _volume = 0.16
+    _file = None
+    _stop = threading.Event()
+
+    @classmethod
+    def _cmd(cls, s):
+        cls._send(s, None, 0, 0)
+
+    @classmethod
+    def init(cls): pass
+
+    @classmethod
+    def get_init(cls): return True
+
+    class music:
+        @staticmethod
+        def load(path):
+            _MciMixer._cmd('close bgm')
+            _MciMixer._file = path
+
+        @staticmethod
+        def play(loops=-1):
+            _MciMixer._stop.set()
+            _MciMixer._cmd('close bgm')
+            _MciMixer._cmd(f'open "{_MciMixer._file}" type mpegvideo alias bgm')
+            _MciMixer._cmd(f'setaudio bgm volume to {int(_MciMixer._volume * 1000)}')
+            _MciMixer._cmd('play bgm from 0')
+            if loops == -1:
+                _MciMixer._stop.clear()
+                def _loop():
+                    buf = _ct.create_unicode_buffer(32)
+                    while not _MciMixer._stop.wait(1.0):
+                        _MciMixer._send('status bgm mode', buf, 32, 0)
+                        if buf.value == 'stopped':
+                            _MciMixer._cmd('play bgm from 0')
+                threading.Thread(target=_loop, daemon=True).start()
+
+        @staticmethod
+        def pause():
+            _MciMixer._cmd('pause bgm')
+
+        @staticmethod
+        def unpause():
+            _MciMixer._cmd('resume bgm')
+
+        @staticmethod
+        def get_busy():
+            buf = _ct.create_unicode_buffer(32)
+            _MciMixer._send('status bgm mode', buf, 32, 0)
+            return buf.value == 'playing'
+
+        @staticmethod
+        def set_volume(v):
+            _MciMixer._volume = v
+            _MciMixer._cmd(f'setaudio bgm volume to {int(v * 1000)}')
+
+        @staticmethod
+        def get_volume():
+            return _MciMixer._volume
+
+    class error(Exception): pass
+
+mixer = _MciMixer()
+
+# --- stdlib replacement for bs4.BeautifulSoup ---
+_VOID_TAGS = {'area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr'}
+
+class _El:
+    __slots__ = ('tag', 'attrs', 'children')
+    def __init__(self, tag, attrs):
+        self.tag = tag
+        self.attrs = dict(attrs)
+        self.children = []
+
+    @property
+    def text(self):
+        return ''.join(c.text if isinstance(c, _El) else c for c in self.children).strip()
+
+    def get_text(self, separator='', strip=False):
+        t = separator.join(c.text if isinstance(c, _El) else c for c in self.children)
+        return t.strip() if strip else t
+
+    def get(self, k, d=''):
+        v = self.attrs.get(k)
+        if v is None:
+            return d
+        return v.split() if k == 'class' else v
+
+    def find(self, tag):
+        for c in self.children:
+            if not isinstance(c, _El): continue
+            if c.tag == tag: return c
+            r = c.find(tag)
+            if r: return r
+        return None
+
+    def find_all(self, tag):
+        out = []
+        for c in self.children:
+            if not isinstance(c, _El): continue
+            if c.tag == tag: out.append(c)
+            out.extend(c.find_all(tag))
+        return out
+
+    def __str__(self):
+        a = ''.join(f' {k}="{v}"' for k, v in self.attrs.items())
+        inner = ''.join(str(c) for c in self.children)
+        return f'<{self.tag}{a}>{inner}</{self.tag}>'
+
+class _SoupParser(_HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self._root = _El('root', [])
+        self._stack = [self._root]
+    def handle_starttag(self, tag, attrs):
+        el = _El(tag, attrs)
+        self._stack[-1].children.append(el)
+        if tag not in _VOID_TAGS:
+            self._stack.append(el)
+    def handle_endtag(self, tag):
+        if len(self._stack) > 1 and self._stack[-1].tag == tag:
+            self._stack.pop()
+    def handle_data(self, data):
+        self._stack[-1].children.append(data)
+
+def BeautifulSoup(html, parser='html.parser'):  # noqa: parser kept for API compat
+    p = _SoupParser()
+    p.feed(html)
+    return p._root
 
 def get_resource_path(filename):
     """Returns the correct path for PyInstaller-bundled resources."""
@@ -698,7 +858,10 @@ class GitHubReleaseManager:
 
     def on_close(self):
         """Handler for the window close event."""
+        _MciMixer._stop.set()
+        _MciMixer._cmd('close bgm')
         self.master.destroy()
+        os._exit(0)
 
     def handle_rate_limit(self):
         """
@@ -1403,7 +1566,7 @@ class ServerBrowser:
 
         # UI Setup
         self.window = tk.Toplevel(self.master)
-        self.window.title("MBII Server Browser")
+        self.window.title("Moviebattles Server Browser")
         self.window.geometry("1200x600")  # Made even wider
         self.window.configure(bg=self.dark_background_color)
         
@@ -1671,10 +1834,13 @@ class ServerBrowser:
         gamedata_dir = os.path.dirname(mbii_dir)
         
         if sys.platform.startswith('win'):
-            executable = os.path.join(gamedata_dir, "MBIII.x86.exe")
+            exe_name = self.ask_launcher_choice()
+            if exe_name is None:
+                return
+            executable = os.path.join(gamedata_dir, exe_name)
         else:
             executable = os.path.join(gamedata_dir, "MBIII.i386")
-        
+
         if not os.path.exists(executable):
             self.show_custom_messagebox("Error", f"Game executable not found at: {executable}")
             return
@@ -1766,6 +1932,71 @@ class ServerBrowser:
             return False # Cancel
         
         return True # Default safe path to join
+
+    def ask_launcher_choice(self):
+        """Prompts the user to choose between MBII or MBIII executable. Returns exe filename or None if cancelled."""
+        result = [None]
+
+        popup = tk.Toplevel(self.window)
+        popup.title("Choose Launcher")
+        popup.configure(bg=self.dark_background_color)
+        popup.resizable(False, False)
+        popup.grab_set()
+
+        if self.icon_path_ico:
+            popup.iconbitmap(self.icon_path_ico)
+
+        popup.geometry("340x160")
+        x = self.window.winfo_x() + self.window.winfo_width() // 2 - 170
+        y = self.window.winfo_y() + self.window.winfo_height() // 2 - 80
+        popup.geometry(f'+{x}+{y}')
+
+        main_frame = tk.Frame(popup, bg=self.dark_background_color, padx=20, pady=15)
+        main_frame.pack(expand=True, fill="both")
+
+        tk.Label(main_frame, text="🎮", font=("Helvetica", 22),
+                 bg=self.dark_background_color, fg="#3498db").pack(pady=(0, 6))
+
+        tk.Label(main_frame, text="Which executable would you like to use?",
+                 font=("Helvetica", 9), bg=self.dark_background_color,
+                 fg=self.text_color, wraplength=300).pack(pady=(0, 12))
+
+        btn_frame = tk.Frame(main_frame, bg=self.dark_background_color)
+        btn_frame.pack()
+
+        def pick(name):
+            result[0] = name
+            popup.destroy()
+
+        mb2_btn = tk.Button(btn_frame, text="MBII  (mbii.x86.exe)", width=18,
+                            command=lambda: pick("mbii.x86.exe"),
+                            bg="#3498db", fg=self.text_color,
+                            activebackground="#2980b9", relief="raised",
+                            font=("Helvetica", 9, "bold"))
+        mb2_btn.grid(row=0, column=0, padx=5)
+        mb2_btn.bind("<Enter>", lambda e: e.widget.configure(bg="#2980b9"))
+        mb2_btn.bind("<Leave>", lambda e: e.widget.configure(bg="#3498db"))
+
+        mb3_btn = tk.Button(btn_frame, text="MBIII  (MBIII.x86.exe)", width=18,
+                            command=lambda: pick("MBIII.x86.exe"),
+                            bg="#4CAF50", fg=self.text_color,
+                            activebackground="#45a049", relief="raised",
+                            font=("Helvetica", 9, "bold"))
+        mb3_btn.grid(row=0, column=1, padx=5)
+        mb3_btn.bind("<Enter>", lambda e: e.widget.configure(bg="#45a049"))
+        mb3_btn.bind("<Leave>", lambda e: e.widget.configure(bg="#4CAF50"))
+
+        cancel_btn = tk.Button(main_frame, text="Cancel",
+                               command=popup.destroy,
+                               bg=self.border_color, fg=self.text_color,
+                               activebackground=self.highlight_color, relief="raised",
+                               font=("Helvetica", 9))
+        cancel_btn.pack(pady=(10, 0))
+        cancel_btn.bind("<Enter>", lambda e: e.widget.configure(bg=self.highlight_color))
+        cancel_btn.bind("<Leave>", lambda e: e.widget.configure(bg=self.border_color))
+
+        popup.wait_window()
+        return result[0]
 
     def ask_for_password(self, server_name):
         """Creates a custom password input dialog and returns the entered password or None if canceled."""
@@ -1950,7 +2181,7 @@ class ServerBrowser:
             print(f"Error in fetch thread: {e}")
             try:
                 if self.window.winfo_exists():
-                    self.window.after(0, lambda: self.status_label.config(text=f"Error: {str(e)}", fg="#e74c3c"))
+                    self.window.after(0, lambda msg=str(e): self.status_label.config(text=f"Error: {msg}", fg="#e74c3c"))
             except tk.TclError:
                 pass
         finally:

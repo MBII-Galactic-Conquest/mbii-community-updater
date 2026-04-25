@@ -1,9 +1,55 @@
 pyinstaller --noconsole --onefile ^
   --icon "icon.ico" ^
+  --optimize 2 ^
   --add-data "background.png;." ^
   --add-data "background.jpg;." ^
   --add-data "icon.ico;." ^
   --add-data "music.mp3;." ^
+  --exclude-module unittest ^
+  --exclude-module test ^
+  --exclude-module xmlrpc ^
+  --exclude-module pdb ^
+  --exclude-module profile ^
+  --exclude-module cProfile ^
+  --exclude-module pstats ^
+  --exclude-module timeit ^
+  --exclude-module trace ^
+  --exclude-module turtle ^
+  --exclude-module turtledemo ^
+  --exclude-module multiprocessing ^
+  --exclude-module pygame ^
+  --exclude-module requests ^
+  --exclude-module bs4 ^
+  --exclude-module lxml ^
+  --exclude-module PIL.BmpImagePlugin ^
+  --exclude-module PIL.DcxImagePlugin ^
+  --exclude-module PIL.EpsImagePlugin ^
+  --exclude-module PIL.FliImagePlugin ^
+  --exclude-module PIL.FpxImagePlugin ^
+  --exclude-module PIL.GbrImagePlugin ^
+  --exclude-module PIL.GifImagePlugin ^
+  --exclude-module PIL.ImImagePlugin ^
+  --exclude-module PIL.ImtImagePlugin ^
+  --exclude-module PIL.IptcImagePlugin ^
+  --exclude-module PIL.McIdasImagePlugin ^
+  --exclude-module PIL.MicImagePlugin ^
+  --exclude-module PIL.MspImagePlugin ^
+  --exclude-module PIL.PalmImagePlugin ^
+  --exclude-module PIL.PcdImagePlugin ^
+  --exclude-module PIL.PcxImagePlugin ^
+  --exclude-module PIL.PixarImagePlugin ^
+  --exclude-module PIL.PpmImagePlugin ^
+  --exclude-module PIL.PsdImagePlugin ^
+  --exclude-module PIL.SgiImagePlugin ^
+  --exclude-module PIL.SpiderImagePlugin ^
+  --exclude-module PIL.SunImagePlugin ^
+  --exclude-module PIL.TgaImagePlugin ^
+  --exclude-module PIL.TiffImagePlugin ^
+  --exclude-module PIL.WebPImagePlugin ^
+  --exclude-module PIL.WmfImagePlugin ^
+  --exclude-module PIL.XbmImagePlugin ^
+  --exclude-module PIL.XpmImagePlugin ^
+  --exclude-module PIL.XVThumbImagePlugin ^
   mbupdater.py
 echo Press enter to exit
 set /p input=

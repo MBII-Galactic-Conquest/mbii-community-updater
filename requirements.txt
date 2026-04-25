@@ -1,6 +1,2 @@
 pyinstaller
 pillow
-requests
-pygame
-beautifulsoup4
-lxml
