@@ -1093,12 +1093,12 @@ class GitHubReleaseManager:
         """Opens a file dialog for the user to select a download directory and validates it."""
         path = filedialog.askdirectory()
         if path:
-            if 'mbii' in path.lower() or 'mbiii' in path.lower():
+            if 'mbii' in path.lower() or 'supremacy' in path.lower():
                 self.download_path = path
                 self.download_path_var.set(path)
                 self.save_mbii_directory(path)
             else:
-                self.show_custom_messagebox("Invalid Directory", "The selected directory must contain 'MBII' or 'MBIII' in its name.", icon_type='error')
+                self.show_custom_messagebox("Invalid Directory", "The selected directory must contain 'MBII' or 'SUPREMACY' in its name.", icon_type='error')
                 self.download_path = None
                 self.download_path_var.set("Not Set")
         self.update_download_button_state()
@@ -1219,7 +1219,7 @@ class GitHubReleaseManager:
         is_path_valid = (
             self.download_path is not None and
             os.path.isdir(self.download_path) and
-            any(k in p for k in ['mbii', 'mbiii'])
+            any(k in p for k in ['mbii', 'supremacy'])
         )
         
         if is_repo_selected and is_version_selected and is_path_valid:
@@ -1238,10 +1238,10 @@ class GitHubReleaseManager:
         """Starts the download process in a separate thread."""
         p = self.download_path.lower() if self.download_path else ""
 
-        if not self.download_path or not any(k in p for k in ['mbii', 'mbiii']):
+        if not self.download_path or not any(k in p for k in ['mbii', 'supremacy']):
             self.show_custom_messagebox(
                 "Error",
-                "Please select a valid MBII or MBIII directory first.",
+                "Please select a valid MBII or SUPREMACY directory first.",
                 icon_type='error'
             )
             return
@@ -1827,7 +1827,7 @@ class ServerBrowser:
         config_data = read_json_file(config_path)
 
         if not config_data or 'path' not in config_data:
-            self.show_custom_messagebox("Error", "MBII or MBIII game directory not found. Please set the directory in the updater first.")
+            self.show_custom_messagebox("Error", "MBII or SUPREMACY game directory not found. Please set the directory in the updater first.")
             return
 
         mbii_dir = config_data['path']
@@ -1839,7 +1839,7 @@ class ServerBrowser:
                 return
             executable = os.path.join(gamedata_dir, exe_name)
         else:
-            executable = os.path.join(gamedata_dir, "MBIII.i386")
+            executable = os.path.join(gamedata_dir, "SUPREMACY.i386")
 
         if not os.path.exists(executable):
             self.show_custom_messagebox("Error", f"Game executable not found at: {executable}")
@@ -1934,7 +1934,7 @@ class ServerBrowser:
         return True # Default safe path to join
 
     def ask_launcher_choice(self):
-        """Prompts the user to choose between MBII or MBIII executable. Returns exe filename or None if cancelled."""
+        """Prompts the user to choose between MBII or SUPREMACY executable. Returns exe filename or None if cancelled."""
         result = [None]
 
         popup = tk.Toplevel(self.window)
@@ -1968,7 +1968,7 @@ class ServerBrowser:
             result[0] = name
             popup.destroy()
 
-        mb2_btn = tk.Button(btn_frame, text="MBII  (mbii.x86.exe)", width=18,
+        mb2_btn = tk.Button(btn_frame, text="MBII", width=18,
                             command=lambda: pick("mbii.x86.exe"),
                             bg="#3498db", fg=self.text_color,
                             activebackground="#2980b9", relief="raised",
@@ -1977,14 +1977,14 @@ class ServerBrowser:
         mb2_btn.bind("<Enter>", lambda e: e.widget.configure(bg="#2980b9"))
         mb2_btn.bind("<Leave>", lambda e: e.widget.configure(bg="#3498db"))
 
-        mb3_btn = tk.Button(btn_frame, text="MBIII  (MBIII.x86.exe)", width=18,
-                            command=lambda: pick("MBIII.x86.exe"),
-                            bg="#4CAF50", fg=self.text_color,
-                            activebackground="#45a049", relief="raised",
-                            font=("Helvetica", 9, "bold"))
-        mb3_btn.grid(row=0, column=1, padx=5)
-        mb3_btn.bind("<Enter>", lambda e: e.widget.configure(bg="#45a049"))
-        mb3_btn.bind("<Leave>", lambda e: e.widget.configure(bg="#4CAF50"))
+        sup_btn = tk.Button(btn_frame, text="SUPREMACY", width=18,
+                           command=lambda: pick("SUPREMACY.x86.exe"),
+                           bg="#4CAF50", fg=self.text_color,
+                           activebackground="#45a049", relief="raised",
+                           font=("Helvetica", 9, "bold"))
+        sup_btn.grid(row=0, column=1, padx=5)
+        sup_btn.bind("<Enter>", lambda e: e.widget.configure(bg="#45a049"))
+        sup_btn.bind("<Leave>", lambda e: e.widget.configure(bg="#4CAF50"))
 
         cancel_btn = tk.Button(main_frame, text="Cancel",
                                command=popup.destroy,
